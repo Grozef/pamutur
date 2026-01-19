@@ -58,7 +58,16 @@
       <div class="right-panel">
         <!-- DROITE HAUT: Liste participants -->
         <section class="participants-panel">
-          <h2>Partants</h2>
+          <div class="panel-header">
+            <h2>Partants</h2>
+            <button
+              v-if="horses.length > 0"
+              @click="downloadAllParticipants"
+              class="download-btn"
+            >
+              ⬇ Télécharger tous
+            </button>
+          </div>
           <div v-if="horses.length === 0" class="empty">
             Sélectionnez une course
           </div>
@@ -84,7 +93,16 @@
 
         <!-- DROITE BAS: Détails participant -->
         <section class="horse-details-panel">
-          <h2>Détails</h2>
+          <div class="panel-header">
+            <h2>Détails</h2>
+            <button
+              v-if="selectedHorse"
+              @click="downloadHorse"
+              class="download-btn"
+            >
+              ⬇ Télécharger
+            </button>
+          </div>
           <div v-if="!selectedHorse" class="empty">
             Cliquez sur un cheval
           </div>
@@ -156,6 +174,32 @@ const handleSelectCourse = async (course) => {
   } catch (err) {
     console.error('Failed to load participants:', err);
   }
+};
+
+const downloadHorse = () => {
+  if (!selectedHorse.value) return;
+
+  const dataStr = JSON.stringify(selectedHorse.value, null, 2);
+  const blob = new Blob([dataStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `cheval_${selectedHorse.value.nom}_${Date.now()}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+const downloadAllParticipants = () => {
+  if (horses.value.length === 0) return;
+
+  const dataStr = JSON.stringify(horses.value, null, 2);
+  const blob = new Blob([dataStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `course_R${selectedReunionNum.value}C${selectedCourseNum.value}_${Date.now()}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
 };
 </script>
 
@@ -245,6 +289,43 @@ h2 {
   position: sticky;
   top: 0;
   z-index: 10;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  background: #ecf0f1;
+  border-bottom: 1px solid #ddd;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.panel-header h2 {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  position: static;
+}
+
+.download-btn {
+  background: #27ae60;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.download-btn:hover {
+  background: #229954;
 }
 
 .empty {
