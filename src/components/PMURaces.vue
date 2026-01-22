@@ -54,18 +54,18 @@
         </div>
       </section>
 
-      <!-- DROITE: Participants + Détails -->
+      <!-- DROITE: Participants + Analyses -->
       <div class="right-panel">
-        <!-- DROITE HAUT: Liste participants -->
+        <!-- Participants -->
         <section class="participants-panel">
           <div class="panel-header">
             <h2>Partants</h2>
             <button
               v-if="horses.length > 0"
-              @click="downloadAllParticipants"
-              class="download-btn"
+              @click="showAnalyses = !showAnalyses"
+              class="analyze-btn"
             >
-              ⬇ Télécharger tous
+              {{ showAnalyses ? 'Masquer analyses' : 'Voir analyses' }}
             </button>
           </div>
           <div v-if="horses.length === 0" class="empty">
@@ -91,24 +91,137 @@
           </div>
         </section>
 
-        <!-- DROITE BAS: Détails participant -->
-        <section class="horse-details-panel">
-          <div class="panel-header">
-            <h2>Détails</h2>
-            <button
-              v-if="selectedHorse"
-              @click="downloadHorse"
-              class="download-btn"
+        <!-- Analyses (Value Bets & Combinaisons) -->
+        <section v-if="showAnalyses" class="analysis-panel">
+          <div class="analysis-tabs">
+            <button 
+              :class="{ active: activeTab === 'valuebets' }"
+              @click="activeTab = 'valuebets'"
             >
-              ⬇ Télécharger
+              Value Bets
+            </button>
+            <button 
+              :class="{ active: activeTab === 'tierce' }"
+              @click="activeTab = 'tierce'"
+            >
+              Tiercé
+            </button>
+            <button 
+              :class="{ active: activeTab === 'quinte' }"
+              @click="activeTab = 'quinte'"
+            >
+              Quinté
             </button>
           </div>
+
+          <!-- Value Bets Tab -->
+          <div v-if="activeTab === 'valuebets'" class="tab-content">
+            <div class="tab-header">
+              <label>
+                Bankroll: 
+                <input v-model.number="bankroll" type="number" min="10" />€
+              </label>
+              <button @click="loadValueBets" :disabled="loadingAnalysis">
+                Analyser
+              </button>
+            </div>
+            
+            <div v-if="valueBetsData" class="analysis-result">
+              <div class="summary">
+                <p><strong>{{ valueBetsData.summary.count }}</strong> value bets</p>
+                <p>Mise totale: <strong>{{ valueBetsData.summary.total_stake }}€</strong></p>
+                <p>EV Total: <strong>+{{ valueBetsData.summary.total_expected_value }}</strong></p>
+              </div>
+
+              <div class="value-bets-list">
+                <div 
+                  v-for="bet in valueBetsData.value_bets" 
+                  :key="bet.horse_id"
+                  class="value-bet-card"
+                >
+                  <div class="horse-name">{{ bet.horse_name }}</div>
+                  <div class="bet-info">
+                    <span>Cote: {{ bet.odds }}</span>
+                    <span>Proba: {{ bet.probability }}%</span>
+                  </div>
+                  <div class="kelly-data">
+                    <div>Miser: <strong>{{ bet.kelly_data.recommended_stake }}€</strong></div>
+                    <div class="ev-positive">EV: +{{ bet.kelly_data.expected_value }}%</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tiercé Tab -->
+          <div v-if="activeTab === 'tierce'" class="tab-content">
+            <div class="tab-header">
+              <label>
+                <input type="checkbox" v-model="tierceOrdre" />
+                Ordre
+              </label>
+              <button @click="loadTierce" :disabled="loadingAnalysis">
+                Générer
+              </button>
+            </div>
+
+            <div v-if="tierceData" class="analysis-result">
+              <div class="combinations-list">
+                <div 
+                  v-for="(combo, i) in tierceData.combinations" 
+                  :key="i"
+                  class="combo-card"
+                >
+                  <div class="combo-rank">#{{ i + 1 }}</div>
+                  <div class="combo-horses">
+                    {{ combo.horses.join(' - ') }}
+                  </div>
+                  <div class="combo-stats">
+                    <span>Proba: {{ combo.probability.toFixed(2) }}%</span>
+                    <span class="ev-positive">EV: +{{ combo.ev_analysis.ev_percentage }}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quinté Tab -->
+          <div v-if="activeTab === 'quinte'" class="tab-content">
+            <div class="tab-header">
+              <button @click="loadQuinte" :disabled="loadingAnalysis">
+                Générer
+              </button>
+            </div>
+
+            <div v-if="quinteData" class="analysis-result">
+              <div class="combinations-list">
+                <div 
+                  v-for="(combo, i) in quinteData.combinations" 
+                  :key="i"
+                  class="combo-card"
+                >
+                  <div class="combo-rank">#{{ i + 1 }}</div>
+                  <div class="combo-horses">
+                    {{ combo.horses.join(' - ') }}
+                  </div>
+                  <div class="combo-stats">
+                    <span>Proba: {{ combo.probability.toFixed(2) }}%</span>
+                    <span class="ev-positive">EV: +{{ combo.ev_analysis.ev_percentage }}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Horse Details (si pas d'analyses affichées) -->
+        <section v-else class="horse-details-panel">
+          <h2>Détails</h2>
           <div v-if="!selectedHorse" class="empty">
             Cliquez sur un cheval
           </div>
           <div v-else class="horse-details">
             <h3>{{ selectedHorse.nom }}</h3>
-
             <div class="details-grid">
               <div v-for="(value, key) in selectedHorse" :key="key" class="detail-row">
                 <div class="detail-key">{{ key }}</div>
@@ -128,6 +241,8 @@
 <script setup>
 import { ref } from 'vue';
 import { usePMU } from '../composables/usePMU';
+import { useValueBets } from '../composables/useValueBets';
+import { useCombinations } from '../composables/useCombinations';
 
 const {
   loading,
@@ -140,14 +255,33 @@ const {
   loadParticipants
 } = usePMU();
 
+const { fetchValueBets } = useValueBets();
+const { fetchTierce, fetchQuinte } = useCombinations();
+
 const selectedReunionNum = ref(null);
 const selectedCourseNum = ref(null);
 const selectedHorse = ref(null);
+const showAnalyses = ref(false);
+const activeTab = ref('valuebets');
+const loadingAnalysis = ref(false);
+
+// Value Bets
+const bankroll = ref(1000);
+const valueBetsData = ref(null);
+
+// Combinaisons
+const tierceOrdre = ref(false);
+const tierceData = ref(null);
+const quinteData = ref(null);
+
+// Fake race ID for demo (should be from real data)
+const currentRaceId = ref(1);
 
 const handleLoadProgramme = async () => {
   selectedReunionNum.value = null;
   selectedCourseNum.value = null;
   selectedHorse.value = null;
+  showAnalyses.value = false;
   try {
     await loadProgramme();
   } catch (err) {
@@ -159,6 +293,7 @@ const handleSelectReunion = async (reunion) => {
   selectedReunionNum.value = reunion.numOfficiel;
   selectedCourseNum.value = null;
   selectedHorse.value = null;
+  showAnalyses.value = false;
   try {
     await loadReunion(reunion.numOfficiel);
   } catch (err) {
@@ -169,6 +304,7 @@ const handleSelectReunion = async (reunion) => {
 const handleSelectCourse = async (course) => {
   selectedCourseNum.value = course.numOrdre;
   selectedHorse.value = null;
+  showAnalyses.value = false;
   try {
     await loadParticipants(selectedReunionNum.value, course.numOrdre);
   } catch (err) {
@@ -176,30 +312,37 @@ const handleSelectCourse = async (course) => {
   }
 };
 
-const downloadHorse = () => {
-  if (!selectedHorse.value) return;
-
-  const dataStr = JSON.stringify(selectedHorse.value, null, 2);
-  const blob = new Blob([dataStr], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `cheval_${selectedHorse.value.nom}_${Date.now()}.json`;
-  link.click();
-  URL.revokeObjectURL(url);
+const loadValueBets = async () => {
+  loadingAnalysis.value = true;
+  try {
+    valueBetsData.value = await fetchValueBets(currentRaceId.value, bankroll.value);
+  } catch (err) {
+    console.error('Failed to load value bets:', err);
+  } finally {
+    loadingAnalysis.value = false;
+  }
 };
 
-const downloadAllParticipants = () => {
-  if (horses.value.length === 0) return;
+const loadTierce = async () => {
+  loadingAnalysis.value = true;
+  try {
+    tierceData.value = await fetchTierce(currentRaceId.value, tierceOrdre.value, 10);
+  } catch (err) {
+    console.error('Failed to load tierce:', err);
+  } finally {
+    loadingAnalysis.value = false;
+  }
+};
 
-  const dataStr = JSON.stringify(horses.value, null, 2);
-  const blob = new Blob([dataStr], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `course_R${selectedReunionNum.value}C${selectedCourseNum.value}_${Date.now()}.json`;
-  link.click();
-  URL.revokeObjectURL(url);
+const loadQuinte = async () => {
+  loadingAnalysis.value = true;
+  try {
+    quinteData.value = await fetchQuinte(currentRaceId.value, 10);
+  } catch (err) {
+    console.error('Failed to load quinte:', err);
+  } finally {
+    loadingAnalysis.value = false;
+  }
 };
 </script>
 
@@ -275,6 +418,7 @@ button:disabled {
   border-bottom: 1px solid #ddd;
 }
 
+.analysis-panel,
 .horse-details-panel {
   flex: 1;
   overflow-y: auto;
@@ -311,20 +455,13 @@ h2 {
   position: static;
 }
 
-.download-btn {
+.analyze-btn {
   background: #27ae60;
-  color: white;
-  border: none;
   padding: 6px 12px;
-  border-radius: 4px;
-  cursor: pointer;
   font-size: 12px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
 }
 
-.download-btn:hover {
+.analyze-btn:hover {
   background: #229954;
 }
 
@@ -426,13 +563,123 @@ h2 {
   font-size: 14px;
 }
 
+/* Analysis Tabs */
+.analysis-tabs {
+  display: flex;
+  background: #ecf0f1;
+  border-bottom: 2px solid #ddd;
+}
+
+.analysis-tabs button {
+  flex: 1;
+  background: transparent;
+  color: #666;
+  border: none;
+  padding: 12px;
+  border-radius: 0;
+}
+
+.analysis-tabs button.active {
+  background: white;
+  color: #2c3e50;
+  border-bottom: 3px solid #3498db;
+}
+
+.tab-content {
+  padding: 15px;
+}
+
+.tab-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 15px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #ddd;
+}
+
+.tab-header label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tab-header input[type="number"] {
+  width: 80px;
+  padding: 5px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.summary {
+  background: #e3f2fd;
+  padding: 15px;
+  border-radius: 5px;
+  margin-bottom: 15px;
+}
+
+.summary p {
+  margin: 5px 0;
+}
+
+.value-bets-list,
+.combinations-list {
+  display: grid;
+  gap: 10px;
+}
+
+.value-bet-card,
+.combo-card {
+  background: #f9f9f9;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  padding: 12px;
+}
+
+.horse-name,
+.combo-horses {
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.bet-info,
+.combo-stats {
+  display: flex;
+  gap: 15px;
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.kelly-data {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 8px;
+  border-top: 1px solid #ddd;
+  font-size: 13px;
+}
+
+.ev-positive {
+  color: #2e7d32;
+  font-weight: bold;
+}
+
+.combo-rank {
+  display: inline-block;
+  background: #3498db;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
 .horse-details {
   padding: 15px;
 }
 
 .horse-details h3 {
   margin: 0 0 15px 0;
-  color: #2c3e50;
 }
 
 .details-grid {

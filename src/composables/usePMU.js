@@ -1,16 +1,35 @@
 import { ref, computed } from 'vue';
-import { pmuApi } from '../services/pmuApi';
+
+const BASE_URL = '/api/pmu';
+const DEFAULT_TIMEOUT = 10000;
+
+async function fetchWithTimeout(url, options = {}, timeout = DEFAULT_TIMEOUT) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error('Request timeout');
+    }
+    throw error;
+  }
+}
 
 export function usePMU() {
-  // State
   const loading = ref(false);
   const error = ref(null);
   const programme = ref(null);
   const selectedReunion = ref(null);
-  const selectedCourse = ref(null);
   const participants = ref(null);
 
-  // Computed
   const reunions = computed(() => {
     return programme.value?.programme?.reunions || [];
   });
@@ -23,16 +42,31 @@ export function usePMU() {
     return participants.value?.participants || [];
   });
 
-  // Methods
+  const getTodayDate = () => {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    return `${day}${month}${year}`;
+  };
+
   const loadProgramme = async (date = null) => {
     loading.value = true;
     error.value = null;
     
     try {
-      programme.value = await pmuApi.getProgramme(date);
+      const dateStr = date || getTodayDate();
+      const response = await fetchWithTimeout(`${BASE_URL}/${dateStr}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      programme.value = await response.json();
       return programme.value;
     } catch (err) {
       error.value = err.message;
+      console.error('Error loading programme:', err);
       throw err;
     } finally {
       loading.value = false;
@@ -44,25 +78,18 @@ export function usePMU() {
     error.value = null;
     
     try {
-      selectedReunion.value = await pmuApi.getReunion(reunionNum, date);
+      const dateStr = date || getTodayDate();
+      const response = await fetchWithTimeout(`${BASE_URL}/${dateStr}/R${reunionNum}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      selectedReunion.value = await response.json();
       return selectedReunion.value;
     } catch (err) {
       error.value = err.message;
-      throw err;
-    } finally {
-      loading.value = false;
-    }
-  };
-
-  const loadCourse = async (reunionNum, courseNum, date = null) => {
-    loading.value = true;
-    error.value = null;
-    
-    try {
-      selectedCourse.value = await pmuApi.getCourse(reunionNum, courseNum, date);
-      return selectedCourse.value;
-    } catch (err) {
-      error.value = err.message;
+      console.error('Error loading reunion:', err);
       throw err;
     } finally {
       loading.value = false;
@@ -74,10 +101,20 @@ export function usePMU() {
     error.value = null;
     
     try {
-      participants.value = await pmuApi.getParticipants(reunionNum, courseNum, date);
+      const dateStr = date || getTodayDate();
+      const response = await fetchWithTimeout(
+        `${BASE_URL}/${dateStr}/R${reunionNum}/C${courseNum}/participants`
+      );
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      participants.value = await response.json();
       return participants.value;
     } catch (err) {
       error.value = err.message;
+      console.error('Error loading participants:', err);
       throw err;
     } finally {
       loading.value = false;
@@ -87,30 +124,23 @@ export function usePMU() {
   const reset = () => {
     programme.value = null;
     selectedReunion.value = null;
-    selectedCourse.value = null;
     participants.value = null;
     error.value = null;
   };
 
   return {
-    // State
     loading,
     error,
     programme,
     selectedReunion,
-    selectedCourse,
     participants,
-    
-    // Computed
     reunions,
     courses,
     horses,
-    
-    // Methods
     loadProgramme,
     loadReunion,
-    loadCourse,
     loadParticipants,
-    reset
+    reset,
+    getTodayDate
   };
 }

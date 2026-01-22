@@ -1,4 +1,26 @@
 const BASE_URL = '/api/pmu';
+const DEFAULT_TIMEOUT = 10000; // 10 seconds
+
+// Fetch with timeout
+async function fetchWithTimeout(url, options = {}, timeout = DEFAULT_TIMEOUT) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error('Request timeout - the server took too long to respond');
+    }
+    throw error;
+  }
+}
 
 export const pmuApi = {
   // Get today's date in DDMMYYYY format
@@ -24,9 +46,14 @@ export const pmuApi = {
     const url = `${BASE_URL}/${dateStr}`;
 
     try {
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorMessage = response.status === 404
+          ? 'Programme not found for this date'
+          : response.status === 500
+          ? 'Server error - please try again later'
+          : `HTTP error! status: ${response.status}`;
+        throw new Error(errorMessage);
       }
       return await response.json();
     } catch (error) {
@@ -41,9 +68,14 @@ export const pmuApi = {
     const url = `${BASE_URL}/${dateStr}/R${reunionNum}`;
 
     try {
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorMessage = response.status === 404
+          ? 'Reunion not found'
+          : response.status === 500
+          ? 'Server error - please try again later'
+          : `HTTP error! status: ${response.status}`;
+        throw new Error(errorMessage);
       }
       return await response.json();
     } catch (error) {
@@ -58,9 +90,14 @@ export const pmuApi = {
     const url = `${BASE_URL}/${dateStr}/R${reunionNum}/C${courseNum}`;
 
     try {
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorMessage = response.status === 404
+          ? 'Course not found'
+          : response.status === 500
+          ? 'Server error - please try again later'
+          : `HTTP error! status: ${response.status}`;
+        throw new Error(errorMessage);
       }
       return await response.json();
     } catch (error) {
@@ -75,9 +112,14 @@ export const pmuApi = {
     const url = `${BASE_URL}/${dateStr}/R${reunionNum}/C${courseNum}/participants`;
 
     try {
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorMessage = response.status === 404
+          ? 'Participants not found'
+          : response.status === 500
+          ? 'Server error - please try again later'
+          : `HTTP error! status: ${response.status}`;
+        throw new Error(errorMessage);
       }
       return await response.json();
     } catch (error) {
