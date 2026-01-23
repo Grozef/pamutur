@@ -62,10 +62,12 @@
             <h2>Partants</h2>
             <button
               v-if="horses.length > 0"
-              @click="showAnalyses = !showAnalyses"
+              @click="handleToggleAnalyses"
               class="analyze-btn"
+              :disabled="!currentRaceId && !resolvingRace"
             >
-              {{ showAnalyses ? 'Masquer analyses' : 'Voir analyses' }}
+              <span v-if="resolvingRace">Résolution...</span>
+              <span v-else>{{ showAnalyses ? 'Masquer analyses' : 'Voir analyses' }}</span>
             </button>
           </div>
           <div v-if="horses.length === 0" class="empty">
@@ -93,20 +95,28 @@
 
         <!-- Analyses (Value Bets & Combinaisons) -->
         <section v-if="showAnalyses" class="analysis-panel">
+          <!-- Race ID Info -->
+          <div v-if="currentRaceId" class="race-id-info">
+            Course DB #{{ currentRaceId }}
+          </div>
+          <div v-else class="race-id-warning">
+            Course non trouvée en base - Lancez d'abord: <code>php artisan pmu:fetch</code>
+          </div>
+
           <div class="analysis-tabs">
-            <button 
+            <button
               :class="{ active: activeTab === 'valuebets' }"
               @click="activeTab = 'valuebets'"
             >
               Value Bets
             </button>
-            <button 
+            <button
               :class="{ active: activeTab === 'tierce' }"
               @click="activeTab = 'tierce'"
             >
               Tiercé
             </button>
-            <button 
+            <button
               :class="{ active: activeTab === 'quinte' }"
               @click="activeTab = 'quinte'"
             >
@@ -118,14 +128,14 @@
           <div v-if="activeTab === 'valuebets'" class="tab-content">
             <div class="tab-header">
               <label>
-                Bankroll: 
+                Bankroll:
                 <input v-model.number="bankroll" type="number" min="10" />€
               </label>
-              <button @click="loadValueBets" :disabled="loadingAnalysis">
+              <button @click="loadValueBets" :disabled="loadingAnalysis || !currentRaceId">
                 Analyser
               </button>
             </div>
-            
+
             <div v-if="valueBetsData" class="analysis-result">
               <div class="summary">
                 <p><strong>{{ valueBetsData.summary.count }}</strong> value bets</p>
@@ -134,8 +144,8 @@
               </div>
 
               <div class="value-bets-list">
-                <div 
-                  v-for="bet in valueBetsData.value_bets" 
+                <div
+                  v-for="bet in valueBetsData.value_bets"
                   :key="bet.horse_id"
                   class="value-bet-card"
                 >
@@ -160,15 +170,15 @@
                 <input type="checkbox" v-model="tierceOrdre" />
                 Ordre
               </label>
-              <button @click="loadTierce" :disabled="loadingAnalysis">
+              <button @click="loadTierce" :disabled="loadingAnalysis || !currentRaceId">
                 Générer
               </button>
             </div>
 
             <div v-if="tierceData" class="analysis-result">
               <div class="combinations-list">
-                <div 
-                  v-for="(combo, i) in tierceData.combinations" 
+                <div
+                  v-for="(combo, i) in tierceData.combinations"
                   :key="i"
                   class="combo-card"
                 >
@@ -188,15 +198,15 @@
           <!-- Quinté Tab -->
           <div v-if="activeTab === 'quinte'" class="tab-content">
             <div class="tab-header">
-              <button @click="loadQuinte" :disabled="loadingAnalysis">
+              <button @click="loadQuinte" :disabled="loadingAnalysis || !currentRaceId">
                 Générer
               </button>
             </div>
 
             <div v-if="quinteData" class="analysis-result">
               <div class="combinations-list">
-                <div 
-                  v-for="(combo, i) in quinteData.combinations" 
+                <div
+                  v-for="(combo, i) in quinteData.combinations"
                   :key="i"
                   class="combo-card"
                 >
@@ -252,7 +262,8 @@ const {
   horses,
   loadProgramme,
   loadReunion,
-  loadParticipants
+  loadParticipants,
+  getTodayDate
 } = usePMU();
 
 const { fetchValueBets } = useValueBets();
@@ -264,6 +275,7 @@ const selectedHorse = ref(null);
 const showAnalyses = ref(false);
 const activeTab = ref('valuebets');
 const loadingAnalysis = ref(false);
+const resolvingRace = ref(false);
 
 // Value Bets
 const bankroll = ref(1000);
@@ -274,14 +286,49 @@ const tierceOrdre = ref(false);
 const tierceData = ref(null);
 const quinteData = ref(null);
 
-// Fake race ID for demo (should be from real data)
-const currentRaceId = ref(1);
+// FIX: Dynamic race ID from selected course
+const currentRaceId = ref(null);
+const currentRaceCode = ref(null);
+
+// FIX: Resolve race ID from PMU data to local DB
+const resolveRaceId = async (date, reunionNum, courseNum) => {
+  resolvingRace.value = true;
+  currentRaceId.value = null;
+
+  try {
+    const dateStr = date || getTodayDate();
+    // Format: DDMMYYYY -> YYYY-MM-DD for internal API
+    const formattedDate = `${dateStr.slice(4, 8)}-${dateStr.slice(2, 4)}-${dateStr.slice(0, 2)}`;
+    const raceCode = `R${reunionNum}C${courseNum}`;
+
+    currentRaceCode.value = raceCode;
+
+    const response = await fetch(
+      `/api/pmu/races/resolve?date=${formattedDate}&race_code=${raceCode}`
+    );
+
+    if (response.ok) {
+      const data = await response.json();
+      currentRaceId.value = data.race_id;
+    } else {
+      console.warn('Race not found in local DB');
+      currentRaceId.value = null;
+    }
+  } catch (err) {
+    console.error('Failed to resolve race ID:', err);
+    currentRaceId.value = null;
+  } finally {
+    resolvingRace.value = false;
+  }
+};
 
 const handleLoadProgramme = async () => {
   selectedReunionNum.value = null;
   selectedCourseNum.value = null;
   selectedHorse.value = null;
   showAnalyses.value = false;
+  currentRaceId.value = null;
+  currentRaceCode.value = null;
   try {
     await loadProgramme();
   } catch (err) {
@@ -294,6 +341,8 @@ const handleSelectReunion = async (reunion) => {
   selectedCourseNum.value = null;
   selectedHorse.value = null;
   showAnalyses.value = false;
+  currentRaceId.value = null;
+  currentRaceCode.value = null;
   try {
     await loadReunion(reunion.numOfficiel);
   } catch (err) {
@@ -305,14 +354,33 @@ const handleSelectCourse = async (course) => {
   selectedCourseNum.value = course.numOrdre;
   selectedHorse.value = null;
   showAnalyses.value = false;
+  valueBetsData.value = null;
+  tierceData.value = null;
+  quinteData.value = null;
+
   try {
     await loadParticipants(selectedReunionNum.value, course.numOrdre);
+    // FIX: Resolve race ID when course is selected
+    await resolveRaceId(null, selectedReunionNum.value, course.numOrdre);
   } catch (err) {
     console.error('Failed to load participants:', err);
   }
 };
 
+const handleToggleAnalyses = async () => {
+  if (!showAnalyses.value && !currentRaceId.value) {
+    // Try to resolve race ID if not already done
+    await resolveRaceId(null, selectedReunionNum.value, selectedCourseNum.value);
+  }
+  showAnalyses.value = !showAnalyses.value;
+};
+
 const loadValueBets = async () => {
+  if (!currentRaceId.value) {
+    console.error('No race ID available');
+    return;
+  }
+
   loadingAnalysis.value = true;
   try {
     valueBetsData.value = await fetchValueBets(currentRaceId.value, bankroll.value);
@@ -324,6 +392,11 @@ const loadValueBets = async () => {
 };
 
 const loadTierce = async () => {
+  if (!currentRaceId.value) {
+    console.error('No race ID available');
+    return;
+  }
+
   loadingAnalysis.value = true;
   try {
     tierceData.value = await fetchTierce(currentRaceId.value, tierceOrdre.value, 10);
@@ -335,6 +408,11 @@ const loadTierce = async () => {
 };
 
 const loadQuinte = async () => {
+  if (!currentRaceId.value) {
+    console.error('No race ID available');
+    return;
+  }
+
   loadingAnalysis.value = true;
   try {
     quinteData.value = await fetchQuinte(currentRaceId.value, 10);
@@ -348,20 +426,23 @@ const loadQuinte = async () => {
 
 <style scoped>
 .pmu-layout {
-  height: 100vh;
   display: flex;
   flex-direction: column;
+  height: 100vh;
 }
 
 header {
   background: #2c3e50;
   color: white;
-  padding: 20px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  padding: 15px 20px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
 }
 
 header h1 {
-  margin: 0 0 10px 0;
+  margin: 0;
+  font-size: 24px;
 }
 
 button {
@@ -461,7 +542,7 @@ h2 {
   font-size: 12px;
 }
 
-.analyze-btn:hover {
+.analyze-btn:hover:not(:disabled) {
   background: #229954;
 }
 
@@ -561,6 +642,30 @@ h2 {
   font-weight: bold;
   color: #e67e22;
   font-size: 14px;
+}
+
+/* Race ID Info */
+.race-id-info {
+  background: #e8f5e9;
+  color: #2e7d32;
+  padding: 8px 15px;
+  font-size: 12px;
+  border-bottom: 1px solid #c8e6c9;
+}
+
+.race-id-warning {
+  background: #fff3e0;
+  color: #e65100;
+  padding: 12px 15px;
+  font-size: 12px;
+  border-bottom: 1px solid #ffcc80;
+}
+
+.race-id-warning code {
+  background: #fff;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: monospace;
 }
 
 /* Analysis Tabs */

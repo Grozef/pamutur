@@ -1,34 +1,97 @@
 import { ref } from 'vue';
 
 const BASE_URL = '/api/pmu';
+const DEFAULT_TIMEOUT = 30000; // 30 seconds for daily analysis
+
+// FIX: Singleton state for shared access
+const topBets = ref(null);
+const topCombinations = ref(null);
+const loading = ref(false);
+const error = ref(null);
+
+async function fetchWithTimeout(url, timeout = DEFAULT_TIMEOUT) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('Request timeout - analysis took too long');
+    }
+    throw err;
+  }
+}
 
 export function useDailyBets() {
-  const topBets = ref(null);
-  const topCombinations = ref(null);
-  const loading = ref(false);
-  const error = ref(null);
-
   const fetchTopBets = async (date = null, bankroll = 1000, limit = 5) => {
     loading.value = true;
     error.value = null;
+    topBets.value = null;
 
     try {
       const dateParam = date || new Date().toISOString().split('T')[0];
-      const response = await fetch(
-        `${BASE_URL}/daily/top-bets?date=${dateParam}&bankroll=${bankroll}&limit=${limit}`
+
+      // FIX: Validate parameters
+      const validBankroll = Math.max(100, Math.min(1000000, Number(bankroll) || 1000));
+      const validLimit = Math.max(1, Math.min(20, Number(limit) || 5));
+
+      const response = await fetchWithTimeout(
+        `${BASE_URL}/daily/top-bets?date=${dateParam}&bankroll=${validBankroll}&limit=${validLimit}`
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
-      topBets.value = data;
 
-      return data;
+      // FIX: Validate response structure
+      if (!data || typeof data !== 'object') {
+        throw new Error('Invalid response format');
+      }
+
+      // Ensure required fields exist with defaults
+      topBets.value = {
+        date: data.date || dateParam,
+        races_count: data.races_count || 0,
+        total_value_bets: data.total_value_bets || 0,
+        top_bets: Array.isArray(data.top_bets) ? data.top_bets : [],
+        summary: {
+          total_stake: data.summary?.total_stake || 0,
+          total_expected_value: data.summary?.total_expected_value || 0,
+          average_ev: data.summary?.average_ev || 0,
+          bankroll_usage: data.summary?.bankroll_usage || 0,
+          estimated_roi: data.summary?.estimated_roi || 0
+        },
+        message: data.message || null
+      };
+
+      return topBets.value;
     } catch (err) {
       error.value = err.message;
       console.error('Error fetching top bets:', err);
+
+      // FIX: Set empty state on error
+      topBets.value = {
+        date: date || new Date().toISOString().split('T')[0],
+        races_count: 0,
+        total_value_bets: 0,
+        top_bets: [],
+        summary: {
+          total_stake: 0,
+          total_expected_value: 0,
+          average_ev: 0,
+          bankroll_usage: 0,
+          estimated_roi: 0
+        },
+        message: err.message
+      };
+
       throw err;
     } finally {
       loading.value = false;
@@ -38,36 +101,72 @@ export function useDailyBets() {
   const fetchTopCombinations = async (date = null, type = 'tierce', limit = 3) => {
     loading.value = true;
     error.value = null;
+    topCombinations.value = null;
 
     try {
       const dateParam = date || new Date().toISOString().split('T')[0];
-      const response = await fetch(
-        `${BASE_URL}/daily/top-combinations?date=${dateParam}&type=${type}&limit=${limit}`
+
+      // FIX: Validate type parameter
+      const validType = ['tierce', 'quinte'].includes(type) ? type : 'tierce';
+      const validLimit = Math.max(1, Math.min(20, Number(limit) || 3));
+
+      const response = await fetchWithTimeout(
+        `${BASE_URL}/daily/top-combinations?date=${dateParam}&type=${validType}&limit=${validLimit}`
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
-      topCombinations.value = data;
 
-      return data;
+      // FIX: Validate and normalize response
+      topCombinations.value = {
+        date: data.date || dateParam,
+        type: data.type || validType,
+        races_analyzed: data.races_analyzed || 0,
+        combinations: Array.isArray(data.combinations) ? data.combinations : [],
+        message: data.message || null
+      };
+
+      return topCombinations.value;
     } catch (err) {
       error.value = err.message;
       console.error('Error fetching top combinations:', err);
+
+      // FIX: Set empty state on error
+      topCombinations.value = {
+        date: date || new Date().toISOString().split('T')[0],
+        type: type,
+        races_analyzed: 0,
+        combinations: [],
+        message: err.message
+      };
+
       throw err;
     } finally {
       loading.value = false;
     }
   };
 
+  // FIX: Add reset function
+  const reset = () => {
+    topBets.value = null;
+    topCombinations.value = null;
+    error.value = null;
+    loading.value = false;
+  };
+
   return {
+    // State (singleton refs)
     topBets,
     topCombinations,
     loading,
     error,
+    // Methods
     fetchTopBets,
-    fetchTopCombinations
+    fetchTopCombinations,
+    reset
   };
 }

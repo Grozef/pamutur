@@ -3,6 +3,13 @@ import { ref, computed } from 'vue';
 const BASE_URL = '/api/pmu';
 const DEFAULT_TIMEOUT = 10000;
 
+// FIX: Singleton state - shared across all components
+const loading = ref(false);
+const error = ref(null);
+const programme = ref(null);
+const selectedReunion = ref(null);
+const participants = ref(null);
+
 async function fetchWithTimeout(url, options = {}, timeout = DEFAULT_TIMEOUT) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -24,12 +31,7 @@ async function fetchWithTimeout(url, options = {}, timeout = DEFAULT_TIMEOUT) {
 }
 
 export function usePMU() {
-  const loading = ref(false);
-  const error = ref(null);
-  const programme = ref(null);
-  const selectedReunion = ref(null);
-  const participants = ref(null);
-
+  // Computed properties using singleton state
   const reunions = computed(() => {
     return programme.value?.programme?.reunions || [];
   });
@@ -50,18 +52,24 @@ export function usePMU() {
     return `${day}${month}${year}`;
   };
 
+  // FIX: Convert DDMMYYYY to YYYY-MM-DD
+  const formatDateForApi = (ddmmyyyy) => {
+    if (!ddmmyyyy || ddmmyyyy.length !== 8) return ddmmyyyy;
+    return `${ddmmyyyy.slice(4, 8)}-${ddmmyyyy.slice(2, 4)}-${ddmmyyyy.slice(0, 2)}`;
+  };
+
   const loadProgramme = async (date = null) => {
     loading.value = true;
     error.value = null;
-    
+
     try {
       const dateStr = date || getTodayDate();
       const response = await fetchWithTimeout(`${BASE_URL}/${dateStr}`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       programme.value = await response.json();
       return programme.value;
     } catch (err) {
@@ -76,15 +84,15 @@ export function usePMU() {
   const loadReunion = async (reunionNum, date = null) => {
     loading.value = true;
     error.value = null;
-    
+
     try {
       const dateStr = date || getTodayDate();
       const response = await fetchWithTimeout(`${BASE_URL}/${dateStr}/R${reunionNum}`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       selectedReunion.value = await response.json();
       return selectedReunion.value;
     } catch (err) {
@@ -99,17 +107,17 @@ export function usePMU() {
   const loadParticipants = async (reunionNum, courseNum, date = null) => {
     loading.value = true;
     error.value = null;
-    
+
     try {
       const dateStr = date || getTodayDate();
       const response = await fetchWithTimeout(
         `${BASE_URL}/${dateStr}/R${reunionNum}/C${courseNum}/participants`
       );
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       participants.value = await response.json();
       return participants.value;
     } catch (err) {
@@ -129,18 +137,22 @@ export function usePMU() {
   };
 
   return {
+    // State (singleton refs)
     loading,
     error,
     programme,
     selectedReunion,
     participants,
+    // Computed
     reunions,
     courses,
     horses,
+    // Methods
     loadProgramme,
     loadReunion,
     loadParticipants,
     reset,
-    getTodayDate
+    getTodayDate,
+    formatDateForApi
   };
 }

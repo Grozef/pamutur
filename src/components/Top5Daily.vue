@@ -2,7 +2,7 @@
   <div class="top5-page">
     <header>
       <div class="header-content">
-        <h1>🏆 Top 5 Paris du Jour</h1>
+        <h1>Top 5 Paris du Jour</h1>
         <p class="subtitle">Les meilleurs value bets selon Kelly Criterion</p>
       </div>
       <div class="controls">
@@ -34,51 +34,51 @@
 
     <!-- Error State -->
     <div v-else-if="error" class="error-state">
-      <div class="error-icon">⚠️</div>
+      <div class="error-icon">!</div>
       <p>{{ error }}</p>
       <button @click="loadTopBets" class="retry-btn">Réessayer</button>
     </div>
 
-    <!-- Empty State -->
-    <div v-else-if="topBets && topBets.top_bets.length === 0" class="empty-state">
-      <div class="empty-icon">🔍</div>
+    <!-- Empty State - FIX: Safe access with optional chaining -->
+    <div v-else-if="topBets && (!topBets.top_bets || topBets.top_bets.length === 0)" class="empty-state">
+      <div class="empty-icon">?</div>
       <h2>Aucun value bet trouvé</h2>
       <p>Aucune course avec des value bets n'a été trouvée pour cette date.</p>
       <p class="hint">Astuce: Essayez une autre date ou lancez <code>php artisan pmu:fetch</code></p>
     </div>
 
-    <!-- Content -->
-    <div v-else-if="topBets" class="content">
-      <!-- Summary Cards -->
+    <!-- Content - FIX: Additional safety checks -->
+    <div v-else-if="topBets && topBets.top_bets && topBets.top_bets.length > 0" class="content">
+      <!-- Summary Cards - FIX: Safe access with defaults -->
       <div class="summary-grid">
         <div class="summary-card">
-          <div class="summary-icon">📊</div>
+          <div class="summary-icon">Stats</div>
           <div class="summary-content">
-            <div class="summary-value">{{ topBets.races_count }}</div>
+            <div class="summary-value">{{ topBets.races_count || 0 }}</div>
             <div class="summary-label">Courses analysées</div>
           </div>
         </div>
 
         <div class="summary-card">
-          <div class="summary-icon">💰</div>
+          <div class="summary-icon">€</div>
           <div class="summary-content">
-            <div class="summary-value">{{ topBets.summary.total_stake }}€</div>
+            <div class="summary-value">{{ getSummaryValue('total_stake', 0) }}€</div>
             <div class="summary-label">Mise totale</div>
           </div>
         </div>
 
         <div class="summary-card highlight">
-          <div class="summary-icon">📈</div>
+          <div class="summary-icon">+</div>
           <div class="summary-content">
-            <div class="summary-value">+{{ topBets.summary.total_expected_value.toFixed(1) }}%</div>
+            <div class="summary-value">+{{ formatNumber(getSummaryValue('total_expected_value', 0)) }}%</div>
             <div class="summary-label">Expected Value</div>
           </div>
         </div>
 
         <div class="summary-card roi">
-          <div class="summary-icon">🎯</div>
+          <div class="summary-icon">ROI</div>
           <div class="summary-content">
-            <div class="summary-value">{{ topBets.summary.estimated_roi.toFixed(0) }}%</div>
+            <div class="summary-value">{{ formatNumber(getSummaryValue('estimated_roi', 0), 0) }}%</div>
             <div class="summary-label">ROI Estimé</div>
           </div>
         </div>
@@ -87,7 +87,7 @@
       <!-- Top 5 Bets -->
       <div class="top-bets-container">
         <h2 class="section-title">
-          <span class="medal">🥇</span>
+          <span class="medal">1st</span>
           Top {{ topBets.top_bets.length }} Value Bets
         </h2>
 
@@ -109,52 +109,52 @@
               <!-- Header -->
               <div class="bet-header">
                 <div class="horse-info">
-                  <h3 class="horse-name">{{ bet.horse_name }}</h3>
+                  <h3 class="horse-name">{{ bet.horse_name || 'N/A' }}</h3>
                   <div class="race-info">
-                    <span class="badge race-badge">{{ bet.race_code }}</span>
-                    <span class="info">{{ bet.hippodrome }}</span>
-                    <span class="info">⏰ {{ bet.race_time }}</span>
-                    <span class="info">{{ bet.distance }}m</span>
-                    <span class="discipline-badge">{{ bet.discipline }}</span>
+                    <span class="badge race-badge">{{ bet.race_code || 'N/A' }}</span>
+                    <span class="info">{{ bet.hippodrome || 'N/A' }}</span>
+                    <span class="info">{{ bet.race_time || 'N/A' }}</span>
+                    <span class="info">{{ bet.distance || 0 }}m</span>
+                    <span class="discipline-badge">{{ bet.discipline || 'N/A' }}</span>
                   </div>
                 </div>
 
-                <div class="probability-badge" :class="getProbabilityClass(bet.probability)">
-                  {{ bet.probability.toFixed(1) }}%
+                <div class="probability-badge" :class="getProbabilityClass(bet.probability || 0)">
+                  {{ formatNumber(bet.probability || 0) }}%
                 </div>
               </div>
 
-              <!-- Stats Grid -->
+              <!-- Stats Grid - FIX: Safe access to nested properties -->
               <div class="stats-grid">
                 <div class="stat">
                   <div class="stat-label">Cote</div>
-                  <div class="stat-value odds">{{ bet.odds.toFixed(1) }}</div>
+                  <div class="stat-value odds">{{ formatNumber(bet.odds || 0) }}</div>
                 </div>
 
                 <div class="stat highlight-stat">
                   <div class="stat-label">Mise Kelly</div>
-                  <div class="stat-value kelly">{{ bet.kelly_data.recommended_stake.toFixed(0) }}€</div>
+                  <div class="stat-value kelly">{{ formatNumber(getKellyValue(bet, 'recommended_stake'), 0) }}€</div>
                 </div>
 
                 <div class="stat highlight-stat">
                   <div class="stat-label">Expected Value</div>
-                  <div class="stat-value ev">+{{ bet.kelly_data.expected_value.toFixed(1) }}%</div>
+                  <div class="stat-value ev">+{{ formatNumber(getKellyValue(bet, 'expected_value')) }}%</div>
                 </div>
 
                 <div class="stat">
                   <div class="stat-label">ROI Attendu</div>
-                  <div class="stat-value roi">{{ bet.kelly_data.roi_per_bet.toFixed(0) }}%</div>
+                  <div class="stat-value roi">{{ formatNumber(getKellyValue(bet, 'roi_per_bet'), 0) }}%</div>
                 </div>
               </div>
 
               <!-- Additional Info -->
               <div class="additional-info">
                 <div v-if="bet.jockey_name" class="info-item">
-                  <span class="info-icon">👤</span>
+                  <span class="info-icon">J</span>
                   <span>{{ bet.jockey_name }}</span>
                 </div>
                 <div v-if="bet.draw" class="info-item">
-                  <span class="info-icon">🎯</span>
+                  <span class="info-icon">#</span>
                   <span>Corde {{ bet.draw }}</span>
                 </div>
                 <div v-if="bet.in_top_group" class="info-item badge-item">
@@ -165,9 +165,9 @@
               <!-- Kelly Explanation -->
               <div class="kelly-explanation">
                 <p>
-                  💡 Kelly Criterion recommande de miser
-                  <strong>{{ bet.kelly_data.kelly_fraction.toFixed(2) }}%</strong> de votre bankroll
-                  ({{ bet.kelly_data.recommended_stake.toFixed(0) }}€ sur {{ bankroll }}€)
+                  Kelly Criterion recommande de miser
+                  <strong>{{ formatNumber(getKellyValue(bet, 'kelly_fraction')) }}%</strong> de votre bankroll
+                  ({{ formatNumber(getKellyValue(bet, 'recommended_stake'), 0) }}€ sur {{ bankroll }}€)
                 </p>
               </div>
             </div>
@@ -178,7 +178,7 @@
       <!-- Additional Info -->
       <div class="info-section">
         <div class="info-card">
-          <h3>💡 Comment utiliser ces informations</h3>
+          <h3>Comment utiliser ces informations</h3>
           <ul>
             <li><strong>Expected Value (EV)</strong> : Gain moyen attendu en pourcentage. Un EV positif indique un pari rentable à long terme.</li>
             <li><strong>Kelly Criterion</strong> : Formule mathématique qui calcule la mise optimale pour maximiser les gains tout en minimisant le risque de ruine.</li>
@@ -188,7 +188,7 @@
         </div>
 
         <div class="info-card warning">
-          <h3>⚠️ Avertissement</h3>
+          <h3>Avertissement</h3>
           <p>
             Ces prédictions sont basées sur des analyses statistiques et ne garantissent pas de gains.
             Les paris hippiques comportent des risques. Jouez de manière responsable et ne misez
@@ -213,6 +213,24 @@ const loadTopBets = async () => {
   await fetchTopBets(selectedDate.value, bankroll.value, 5);
 };
 
+// FIX: Safe access helper for summary values
+const getSummaryValue = (key, defaultValue = 0) => {
+  return topBets.value?.summary?.[key] ?? defaultValue;
+};
+
+// FIX: Safe access helper for kelly_data
+const getKellyValue = (bet, key, defaultValue = 0) => {
+  return bet?.kelly_data?.[key] ?? defaultValue;
+};
+
+// FIX: Safe number formatting
+const formatNumber = (value, decimals = 1) => {
+  if (value === null || value === undefined || isNaN(value)) {
+    return '0';
+  }
+  return Number(value).toFixed(decimals);
+};
+
 const getRankClass = (index) => {
   if (index === 0) return 'rank-1';
   if (index === 1) return 'rank-2';
@@ -221,7 +239,7 @@ const getRankClass = (index) => {
 };
 
 const getRankEmoji = (index) => {
-  const emojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+  const emojis = ['1st', '2nd', '3rd', '4th', '5th'];
   return emojis[index] || '';
 };
 
@@ -351,7 +369,7 @@ button:disabled {
 }
 
 .error-icon, .empty-icon {
-  font-size: 64px;
+  font-size: 48px;
   margin-bottom: 20px;
 }
 
@@ -405,7 +423,8 @@ code {
 }
 
 .summary-icon {
-  font-size: 40px;
+  font-size: 24px;
+  font-weight: bold;
 }
 
 .summary-value {
@@ -437,7 +456,9 @@ code {
 }
 
 .medal {
-  font-size: 32px;
+  font-size: 20px;
+  font-weight: bold;
+  color: #ffd700;
 }
 
 .bets-list {
@@ -508,7 +529,8 @@ code {
 }
 
 .rank-emoji {
-  font-size: 20px;
+  font-size: 12px;
+  color: white;
 }
 
 .bet-content {
@@ -631,7 +653,9 @@ code {
 }
 
 .info-icon {
-  font-size: 16px;
+  font-size: 14px;
+  font-weight: bold;
+  color: #7f8c8d;
 }
 
 .group-badge {
