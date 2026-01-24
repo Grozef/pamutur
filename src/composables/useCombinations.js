@@ -1,33 +1,17 @@
 import { ref } from 'vue';
+import { fetchWithTimeout } from '@/utils/fetch';
 
 const BASE_URL = '/api/pmu';
 const DEFAULT_TIMEOUT = 15000;
 
-// FIX: Singleton state
+// Singleton state
 const combinations = ref([]);
 const loading = ref(false);
 const error = ref(null);
 
-async function fetchWithTimeout(url, timeout = DEFAULT_TIMEOUT) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (err.name === 'AbortError') {
-      throw new Error('Request timeout');
-    }
-    throw err;
-  }
-}
-
 export function useCombinations() {
   const fetchTierce = async (raceId, ordre = false, limit = 10) => {
-    // FIX: Validate inputs
+    // Validate inputs
     if (!raceId || raceId <= 0) {
       throw new Error('Invalid race ID');
     }
@@ -39,7 +23,9 @@ export function useCombinations() {
 
     try {
       const response = await fetchWithTimeout(
-        `${BASE_URL}/races/${raceId}/combinations/tierce?ordre=${ordre}&limit=${validLimit}`
+        `${BASE_URL}/races/${raceId}/combinations/tierce?ordre=${ordre}&limit=${validLimit}`,
+        {},
+        DEFAULT_TIMEOUT
       );
 
       if (!response.ok) {
@@ -49,7 +35,7 @@ export function useCombinations() {
 
       const data = await response.json();
 
-      // FIX: Validate response structure
+      // Validate response structure
       combinations.value = Array.isArray(data.combinations) ? data.combinations : [];
 
       return {
@@ -70,7 +56,7 @@ export function useCombinations() {
   };
 
   const fetchQuinte = async (raceId, limit = 10) => {
-    // FIX: Validate inputs
+    // Validate inputs
     if (!raceId || raceId <= 0) {
       throw new Error('Invalid race ID');
     }
@@ -82,7 +68,9 @@ export function useCombinations() {
 
     try {
       const response = await fetchWithTimeout(
-        `${BASE_URL}/races/${raceId}/combinations/quinte?limit=${validLimit}`
+        `${BASE_URL}/races/${raceId}/combinations/quinte?limit=${validLimit}`,
+        {},
+        DEFAULT_TIMEOUT
       );
 
       if (!response.ok) {
@@ -92,7 +80,7 @@ export function useCombinations() {
 
       const data = await response.json();
 
-      // FIX: Validate response structure
+      // Validate response structure
       combinations.value = Array.isArray(data.combinations) ? data.combinations : [];
 
       return {

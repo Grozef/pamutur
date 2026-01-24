@@ -1,30 +1,15 @@
 import { ref } from 'vue';
+import { fetchWithTimeout } from '@/utils/fetch';
+import { getTodayISO } from '@/utils/date';
 
 const BASE_URL = '/api/pmu';
 const DEFAULT_TIMEOUT = 30000; // 30 seconds for daily analysis
 
-// FIX: Singleton state for shared access
+// Singleton state for shared access
 const topBets = ref(null);
 const topCombinations = ref(null);
 const loading = ref(false);
 const error = ref(null);
-
-async function fetchWithTimeout(url, timeout = DEFAULT_TIMEOUT) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (err.name === 'AbortError') {
-      throw new Error('Request timeout - analysis took too long');
-    }
-    throw err;
-  }
-}
 
 export function useDailyBets() {
   const fetchTopBets = async (date = null, bankroll = 1000, limit = 5) => {
@@ -33,14 +18,16 @@ export function useDailyBets() {
     topBets.value = null;
 
     try {
-      const dateParam = date || new Date().toISOString().split('T')[0];
+      const dateParam = date || getTodayISO();
 
-      // FIX: Validate parameters
+      // Validate parameters
       const validBankroll = Math.max(100, Math.min(1000000, Number(bankroll) || 1000));
       const validLimit = Math.max(1, Math.min(20, Number(limit) || 5));
 
       const response = await fetchWithTimeout(
-        `${BASE_URL}/daily/top-bets?date=${dateParam}&bankroll=${validBankroll}&limit=${validLimit}`
+        `${BASE_URL}/daily/top-bets?date=${dateParam}&bankroll=${validBankroll}&limit=${validLimit}`,
+        {},
+        DEFAULT_TIMEOUT
       );
 
       if (!response.ok) {
@@ -50,7 +37,7 @@ export function useDailyBets() {
 
       const data = await response.json();
 
-      // FIX: Validate response structure
+      // Validate response structure
       if (!data || typeof data !== 'object') {
         throw new Error('Invalid response format');
       }
@@ -76,9 +63,9 @@ export function useDailyBets() {
       error.value = err.message;
       console.error('Error fetching top bets:', err);
 
-      // FIX: Set empty state on error
+      // Set empty state on error
       topBets.value = {
-        date: date || new Date().toISOString().split('T')[0],
+        date: date || getTodayISO(),
         races_count: 0,
         total_value_bets: 0,
         top_bets: [],
@@ -104,14 +91,16 @@ export function useDailyBets() {
     topCombinations.value = null;
 
     try {
-      const dateParam = date || new Date().toISOString().split('T')[0];
+      const dateParam = date || getTodayISO();
 
-      // FIX: Validate type parameter
+      // Validate type parameter
       const validType = ['tierce', 'quinte'].includes(type) ? type : 'tierce';
       const validLimit = Math.max(1, Math.min(20, Number(limit) || 3));
 
       const response = await fetchWithTimeout(
-        `${BASE_URL}/daily/top-combinations?date=${dateParam}&type=${validType}&limit=${validLimit}`
+        `${BASE_URL}/daily/top-combinations?date=${dateParam}&type=${validType}&limit=${validLimit}`,
+        {},
+        DEFAULT_TIMEOUT
       );
 
       if (!response.ok) {
@@ -121,7 +110,7 @@ export function useDailyBets() {
 
       const data = await response.json();
 
-      // FIX: Validate and normalize response
+      // Validate and normalize response
       topCombinations.value = {
         date: data.date || dateParam,
         type: data.type || validType,
@@ -135,9 +124,9 @@ export function useDailyBets() {
       error.value = err.message;
       console.error('Error fetching top combinations:', err);
 
-      // FIX: Set empty state on error
+      // Set empty state on error
       topCombinations.value = {
-        date: date || new Date().toISOString().split('T')[0],
+        date: date || getTodayISO(),
         type: type,
         races_analyzed: 0,
         combinations: [],
@@ -150,7 +139,6 @@ export function useDailyBets() {
     }
   };
 
-  // FIX: Add reset function
   const reset = () => {
     topBets.value = null;
     topCombinations.value = null;

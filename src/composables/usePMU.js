@@ -1,34 +1,16 @@
 import { ref, computed } from 'vue';
+import { fetchWithTimeout } from '@/utils/fetch';
+import { getTodayDDMMYYYY, convertDDMMYYYYToISO } from '@/utils/date';
 
 const BASE_URL = '/api/pmu';
 const DEFAULT_TIMEOUT = 10000;
 
-// FIX: Singleton state - shared across all components
+// Singleton state - shared across all components
 const loading = ref(false);
 const error = ref(null);
 const programme = ref(null);
 const selectedReunion = ref(null);
 const participants = ref(null);
-
-async function fetchWithTimeout(url, options = {}, timeout = DEFAULT_TIMEOUT) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error('Request timeout');
-    }
-    throw error;
-  }
-}
 
 export function usePMU() {
   // Computed properties using singleton state
@@ -45,17 +27,11 @@ export function usePMU() {
   });
 
   const getTodayDate = () => {
-    const now = new Date();
-    const day = String(now.getDate()).padStart(2, '0');
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const year = now.getFullYear();
-    return `${day}${month}${year}`;
+    return getTodayDDMMYYYY();
   };
 
-  // FIX: Convert DDMMYYYY to YYYY-MM-DD
   const formatDateForApi = (ddmmyyyy) => {
-    if (!ddmmyyyy || ddmmyyyy.length !== 8) return ddmmyyyy;
-    return `${ddmmyyyy.slice(4, 8)}-${ddmmyyyy.slice(2, 4)}-${ddmmyyyy.slice(0, 2)}`;
+    return convertDDMMYYYYToISO(ddmmyyyy);
   };
 
   const loadProgramme = async (date = null) => {
@@ -64,7 +40,7 @@ export function usePMU() {
 
     try {
       const dateStr = date || getTodayDate();
-      const response = await fetchWithTimeout(`${BASE_URL}/${dateStr}`);
+      const response = await fetchWithTimeout(`${BASE_URL}/${dateStr}`, {}, DEFAULT_TIMEOUT);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -87,7 +63,7 @@ export function usePMU() {
 
     try {
       const dateStr = date || getTodayDate();
-      const response = await fetchWithTimeout(`${BASE_URL}/${dateStr}/R${reunionNum}`);
+      const response = await fetchWithTimeout(`${BASE_URL}/${dateStr}/R${reunionNum}`, {}, DEFAULT_TIMEOUT);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -111,7 +87,9 @@ export function usePMU() {
     try {
       const dateStr = date || getTodayDate();
       const response = await fetchWithTimeout(
-        `${BASE_URL}/${dateStr}/R${reunionNum}/C${courseNum}/participants`
+        `${BASE_URL}/${dateStr}/R${reunionNum}/C${courseNum}/participants`,
+        {},
+        DEFAULT_TIMEOUT
       );
 
       if (!response.ok) {
