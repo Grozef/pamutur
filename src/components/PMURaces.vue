@@ -149,7 +149,7 @@
                   :key="bet.horse_id"
                   class="value-bet-card"
                 >
-                  <div class="horse-name">{{ bet.horse_name }}</div>
+                  <div class="horse-name"><strong>[{{ bet.draw }}]</strong> {{ bet.horse_name }}</div>
                   <div class="bet-info">
                     <span>Cote: {{ bet.odds }}</span>
                     <span>Proba: {{ bet.probability }}%</span>
