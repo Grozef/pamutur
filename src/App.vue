@@ -3,8 +3,11 @@
   import PMURaces from './components/PMURaces.vue'
   import TopHorses from './components/TopHorses.vue'
   import Top5Daily from './components/Top5Daily.vue'
+  import BettingReport from './components/BettingReport.vue'
+  import StoredBetsViewer from './components/StoredBetsViewer.vue'
+  import ManualKellyBets from './components/ManualKellyBets.vue'
 
-  const currentView = ref('races') // 'races', 'top', ou 'top5'
+  const currentView = ref('races')
 </script>
 
 <template>
@@ -29,12 +32,33 @@
       >
         🥇 Top 5 du Jour
       </button>
+      <button
+        :class="{ active: currentView === 'stored' }"
+        @click="currentView = 'stored'"
+      >
+        📋 Paris Stockés
+      </button>
+      <button
+        :class="{ active: currentView === 'kelly' }"
+        @click="currentView = 'kelly'"
+      >
+        🎯 Paris Kelly
+      </button>
+      <button
+        :class="{ active: currentView === 'betting' }"
+        @click="currentView = 'betting'"
+      >
+        📊 Rapport Paris
+      </button>
     </nav>
 
     <!-- Affichage conditionnel -->
     <PMURaces v-if="currentView === 'races'" />
     <TopHorses v-else-if="currentView === 'top'" />
     <Top5Daily v-else-if="currentView === 'top5'" />
+    <StoredBetsViewer v-else-if="currentView === 'stored'" />
+    <ManualKellyBets v-else-if="currentView === 'kelly'" />
+    <BettingReport v-else-if="currentView === 'betting'" />
   </div>
 </template>
 

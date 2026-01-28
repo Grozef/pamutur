@@ -11,8 +11,33 @@
         <button @click="loadAllPredictions" :disabled="loading">
           {{ loading ? 'Chargement...' : 'Actualiser' }}
         </button>
+        <button
+          @click="storeBets"
+          :disabled="loading || storing || allPredictions.length === 0"
+          class="store-btn"
+        >
+          {{ storing ? '💾 Stockage...' : '💾 Stocker les Paris' }}
+        </button>
       </div>
     </header>
+
+    <!-- Store Success Message -->
+    <div v-if="storeResult" class="store-result success">
+      <span class="close-btn" @click="storeResult = null">✕</span>
+      <h3>✓ Paris stockés avec succès !</h3>
+      <div class="store-stats">
+        <span>{{ storeResult.daily_bets_stored }} paris quotidiens</span>
+        <span>{{ storeResult.value_bets_stored }} value bets</span>
+        <span>{{ storeResult.combinations_created }} combinaisons</span>
+      </div>
+    </div>
+
+    <!-- Store Error Message -->
+    <div v-if="storeError" class="store-result error">
+      <span class="close-btn" @click="storeError = null">✕</span>
+      <h3>✗ Erreur</h3>
+      <p>{{ storeError }}</p>
+    </div>
 
     <div class="stats" v-if="!loading">
       <div class="stat-card">
@@ -119,6 +144,29 @@
               VALUE BET
             </span>
           </div>
+
+          <!-- Manual Bet Input -->
+          <div class="manual-bet-input">
+            <input
+              type="number"
+              v-model.number="horse.manualAmount"
+              placeholder="€"
+              min="0"
+              step="0.5"
+              class="amount-input"
+            />
+            <select v-model="horse.betType" class="bet-type-select">
+              <option value="SIMPLE">Simple</option>
+              <option value="COUPLE_PLACE">Couplé Placé</option>
+            </select>
+            <button
+              @click="addManualBet(horse)"
+              :disabled="!horse.manualAmount || horse.manualAmount <= 0 || addingBet"
+              class="add-bet-btn"
+            >
+              {{ addingBet ? '...' : '➕' }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -126,16 +174,40 @@
         Aucune prédiction disponible.
         <br>Lancez d'abord: <code>php artisan pmu:fetch</code>
       </div>
+
+      <!-- Manual Bets List -->
+      <div v-if="manualBets.length > 0" class="manual-bets-section">
+        <h2>Paris Ajoutés ({{ manualBets.length }})</h2>
+        <div class="manual-bets-grid">
+          <div v-for="bet in manualBets" :key="bet.id" class="manual-bet-card">
+            <div class="bet-info">
+              <span class="horse-name">{{ bet.horse_name }}</span>
+              <span class="bet-type">{{ bet.bet_type }}</span>
+            </div>
+            <div class="bet-actions">
+              <span class="amount">{{ bet.amount }}€</span>
+              <button @click="deleteManualBet(bet.id)" class="delete-btn">🗑️</button>
+            </div>
+          </div>
+        </div>
+        <div class="total">Total: {{ totalManualBets }}€</div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import { pmuApi } from '../services/pmuApi'
 
 const races = ref([])
 const allPredictions = ref([])
 const loading = ref(false)
+const storing = ref(false)
+const addingBet = ref(false)
+const storeResult = ref(null)
+const storeError = ref(null)
+const manualBets = ref([])
 const selectedDate = ref(new Date().toISOString().split('T')[0])
 const currentTab = ref('all')
 
@@ -185,7 +257,9 @@ async function loadAllPredictions() {
                 hour: '2-digit',
                 minute: '2-digit'
               }),
-              race_scenario: scenario
+              race_scenario: scenario,
+              manualAmount: null,
+              betType: 'SIMPLE'
             })
           })
         }
@@ -195,11 +269,129 @@ async function loadAllPredictions() {
     }
 
     console.log('Total prédictions:', allPredictions.value.length)
+
+    // Load manual bets
+    await loadManualBets()
   } catch (error) {
     console.error('Erreur chargement:', error)
     races.value = []
   } finally {
     loading.value = false
+  }
+}
+
+async function loadManualBets() {
+  try {
+    const response = await fetch(`/api/pmu/betting/manual-bets?date=${selectedDate.value}`)
+    if (response.ok) {
+      const data = await response.json()
+      manualBets.value = data.data || []
+    }
+  } catch (err) {
+    console.error('Error loading manual bets:', err)
+  }
+}
+
+async function addManualBet(horse) {
+  if (!horse.manualAmount || horse.manualAmount <= 0) return
+
+  addingBet.value = true
+
+  try {
+    const response = await fetch('/api/pmu/betting/manual-bets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bet_date: selectedDate.value,
+        horse_id: horse.horse_id,
+        horse_name: horse.horse_name,
+        amount: horse.manualAmount,
+        bet_type: horse.betType,
+        probability: horse.probability / 100,
+        odds: horse.odds_ref,
+        metadata: {
+          race_id: horse.race_id,
+          hippodrome: horse.hippodrome,
+          discipline: horse.discipline
+        }
+      })
+    })
+
+    if (!response.ok) throw new Error('Erreur')
+
+    horse.manualAmount = null
+    horse.betType = 'SIMPLE'
+
+    await loadManualBets()
+
+    storeResult.value = { message: 'Pari ajouté' }
+    setTimeout(() => { storeResult.value = null }, 2000)
+  } catch (err) {
+    storeError.value = err.message
+    setTimeout(() => { storeError.value = null }, 3000)
+  } finally {
+    addingBet.value = false
+  }
+}
+
+async function deleteManualBet(betId) {
+  if (!confirm('Supprimer ?')) return
+
+  try {
+    const response = await fetch(`/api/pmu/betting/manual-bets/${betId}`, {
+      method: 'DELETE'
+    })
+
+    if (!response.ok) throw new Error('Erreur')
+
+    await loadManualBets()
+  } catch (err) {
+    console.error('Error:', err)
+    alert('Erreur')
+  }
+}
+
+const totalManualBets = computed(() => {
+  return manualBets.value.reduce((sum, bet) => sum + parseFloat(bet.amount), 0).toFixed(2)
+})
+
+async function storeBets() {
+  if (allPredictions.value.length === 0) {
+    storeError.value = 'Aucune prédiction'
+    return
+  }
+
+  storing.value = true
+  storeResult.value = null
+  storeError.value = null
+
+  try {
+    const predictions = allPredictions.value.map(pred => ({
+      race_id: pred.race_id,
+      horse_id: pred.horse_id,
+      horse_name: pred.horse_name,
+      probability: pred.probability / 100,
+      odds: pred.odds_ref || null,
+      metadata: {
+        hippodrome: pred.hippodrome,
+        distance: pred.distance,
+        discipline: pred.discipline,
+        jockey: pred.jockey_name,
+        trainer: pred.trainer_name,
+        in_top_group: pred.in_top_group,
+        value_bet: pred.value_bet
+      }
+    }))
+
+    const response = await pmuApi.processPredictions(selectedDate.value, predictions)
+    storeResult.value = response.data
+
+    setTimeout(() => { storeResult.value = null }, 5000)
+  } catch (error) {
+    console.error('Error:', error)
+    storeError.value = error.message || 'Erreur'
+  } finally {
+    storing.value = false
   }
 }
 
@@ -585,5 +777,208 @@ code {
   padding: 2px 6px;
   border-radius: 3px;
   font-family: monospace;
+}
+
+/* Store Bets Button */
+.store-btn {
+  background: #10b981 !important;
+}
+
+.store-btn:hover:not(:disabled) {
+  background: #059669 !important;
+}
+
+/* Store Result Messages */
+.store-result {
+  margin-bottom: 20px;
+  padding: 15px 20px;
+  border-radius: 8px;
+  position: relative;
+  animation: slideDown 0.3s ease-out;
+}
+
+.store-result.success {
+  background: #d1fae5;
+  border: 2px solid #10b981;
+  color: #065f46;
+}
+
+.store-result.error {
+  background: #fee2e2;
+  border: 2px solid #ef4444;
+  color: #991b1b;
+}
+
+.store-result h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.store-result p {
+  margin: 0;
+}
+
+.store-stats {
+  display: flex;
+  gap: 15px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.close-btn {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  cursor: pointer;
+  font-size: 20px;
+  color: #666;
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: #000;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Manual Bet Input */
+.manual-bet-input {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e5e5e5;
+}
+
+.amount-input {
+  width: 80px;
+  padding: 6px 10px;
+  border: 2px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.bet-type-select {
+  padding: 6px 10px;
+  border: 2px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  background: white;
+}
+
+.add-bet-btn {
+  padding: 6px 12px;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.add-bet-btn:hover:not(:disabled) {
+  background: #059669;
+}
+
+.add-bet-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Manual Bets Section */
+.manual-bets-section {
+  margin-top: 30px;
+  padding: 20px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.manual-bets-section h2 {
+  margin: 0 0 15px;
+  font-size: 1.5rem;
+  color: #1a1a1a;
+}
+
+.manual-bets-grid {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.manual-bet-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: #f9fafb;
+  border: 2px solid #e5e5e5;
+  border-radius: 8px;
+}
+
+.bet-info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.bet-info .horse-name {
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.bet-info .bet-type {
+  font-size: 12px;
+  color: #666;
+  font-weight: 600;
+}
+
+.bet-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bet-actions .amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: #10b981;
+}
+
+.delete-btn {
+  padding: 6px 10px;
+  background: #ef4444;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.delete-btn:hover {
+  background: #dc2626;
+}
+
+.manual-bets-section .total {
+  padding: 12px;
+  background: #f0f9ff;
+  border: 2px solid #2563eb;
+  border-radius: 8px;
+  text-align: right;
+  font-size: 18px;
+  font-weight: 700;
+  color: #2563eb;
 }
 </style>
