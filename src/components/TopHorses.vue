@@ -145,6 +145,16 @@
             </span>
           </div>
 
+          <!-- Combinaisons Actions -->
+          <div class="combination-actions">
+            <button @click="startCombinaison(horse, 'COUPLE')" class="combo-btn couple">
+              🔗 Couplé
+            </button>
+            <button @click="startCombinaison(horse, 'TRIO')" class="combo-btn trio">
+              🔗🔗 Trio
+            </button>
+          </div>
+
           <!-- Manual Bet Input -->
           <div class="manual-bet-input">
             <input
@@ -193,12 +203,24 @@
         <div class="total">Total: {{ totalManualBets }}€</div>
       </div>
     </div>
+
+    <!-- Combinaison Modal -->
+    <CombinaisonModal
+      v-if="showCombinaisonModal"
+      :firstBet="selectedHorse"
+      :type="combinationType"
+      :isValueBet="false"
+      :date="selectedDate"
+      @close="closeCombinaisonModal"
+      @success="onCombinaisonAdded"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { pmuApi } from '../services/pmuApi'
+import CombinaisonModal from './CombinaisonModal.vue'
 
 const races = ref([])
 const allPredictions = ref([])
@@ -210,6 +232,43 @@ const storeError = ref(null)
 const manualBets = ref([])
 const selectedDate = ref(new Date().toISOString().split('T')[0])
 const currentTab = ref('all')
+
+// Combinaison modal
+const showCombinaisonModal = ref(false)
+const selectedHorse = ref(null)
+const combinationType = ref('COUPLE')
+
+/**
+ * Start creating a combination from a horse
+ */
+const startCombinaison = (horse, type) => {
+  // Convert horse data to bet format expected by modal
+  selectedHorse.value = {
+    horse_id: horse.horse_id,
+    horse_name: horse.horse_name,
+    race_id: horse.race_id,
+    probability: horse.probability / 100, // Convert to decimal
+    race: {
+      id: horse.race_id,
+      race_code: horse.race_code,
+      hippodrome: horse.hippodrome,
+      distance: horse.distance
+    }
+  }
+  combinationType.value = type
+  showCombinaisonModal.value = true
+}
+
+const closeCombinaisonModal = () => {
+  showCombinaisonModal.value = false
+  selectedHorse.value = null
+}
+
+const onCombinaisonAdded = () => {
+  closeCombinaisonModal()
+  storeResult.value = { message: 'Combinaison ajoutée' }
+  setTimeout(() => { storeResult.value = null }, 2000)
+}
 
 async function loadAllPredictions() {
   loading.value = true
@@ -243,9 +302,9 @@ async function loadAllPredictions() {
         const predData = await predResponse.json()
 
         if (predData.predictions && Array.isArray(predData.predictions)) {
-  const scenario = predData.predictions[0]?.race_scenario || null
+          const scenario = predData.predictions[0]?.race_scenario || null
 
-  predData.predictions.forEach(pred => {
+          predData.predictions.forEach(pred => {
             allPredictions.value.push({
               ...pred,
               race_id: race.id,
@@ -270,7 +329,6 @@ async function loadAllPredictions() {
 
     console.log('Total prédictions:', allPredictions.value.length)
 
-    // Load manual bets
     await loadManualBets()
   } catch (error) {
     console.error('Erreur chargement:', error)
@@ -351,18 +409,8 @@ async function deleteManualBet(betId) {
   }
 }
 
-const totalManualBets = computed(() => {
-  return manualBets.value.reduce((sum, bet) => sum + parseFloat(bet.amount), 0).toFixed(2)
-})
-
 async function storeBets() {
-  if (allPredictions.value.length === 0) {
-    storeError.value = 'Aucune prédiction'
-    return
-  }
-
   storing.value = true
-  storeResult.value = null
   storeError.value = null
 
   try {
@@ -371,13 +419,12 @@ async function storeBets() {
       horse_id: pred.horse_id,
       horse_name: pred.horse_name,
       probability: pred.probability / 100,
-      odds: pred.odds_ref || null,
+      odds: pred.odds_ref,
       metadata: {
         hippodrome: pred.hippodrome,
         distance: pred.distance,
         discipline: pred.discipline,
         jockey: pred.jockey_name,
-        trainer: pred.trainer_name,
         in_top_group: pred.in_top_group,
         value_bet: pred.value_bet
       }
@@ -385,11 +432,9 @@ async function storeBets() {
 
     const response = await pmuApi.processPredictions(selectedDate.value, predictions)
     storeResult.value = response.data
-
-    setTimeout(() => { storeResult.value = null }, 5000)
   } catch (error) {
-    console.error('Error:', error)
-    storeError.value = error.message || 'Erreur'
+    console.error('Error storing bets:', error)
+    storeError.value = error.message || 'Erreur lors du stockage'
   } finally {
     storing.value = false
   }
@@ -408,50 +453,56 @@ const topGroupHorses = computed(() => {
 })
 
 const displayedHorses = computed(() => {
-  if (currentTab.value === 'value') return valueBets.value
-  if (currentTab.value === 'grouped') return topGroupHorses.value
-  return sortedHorses.value
+  switch (currentTab.value) {
+    case 'value':
+      return valueBets.value
+    case 'grouped':
+      return topGroupHorses.value
+    default:
+      return sortedHorses.value
+  }
 })
 
 const scenariosCount = computed(() => {
   const scenarios = new Set()
-  allPredictions.value.forEach(p => {
-    if (p.race_scenario) {
-      scenarios.add(`${p.race_id}-${p.race_scenario.scenario}`)
+  allPredictions.value.forEach(pred => {
+    if (pred.race_scenario?.scenario) {
+      scenarios.add(pred.race_scenario.scenario)
     }
   })
   return scenarios.size
 })
 
+const totalManualBets = computed(() => {
+  return manualBets.value.reduce((sum, bet) => sum + parseFloat(bet.amount || 0), 0)
+})
+
 function shouldShowScenario(horse, index) {
-  if (index === 0) return true
-
-  const currentList = displayedHorses.value
-  const previousHorse = currentList[index - 1]
-
-  return horse.race_id !== previousHorse?.race_id
+  const sameRaceHorses = displayedHorses.value.filter(h => h.race_id === horse.race_id)
+  const firstInRace = sameRaceHorses[0]
+  return horse.horse_id === firstInRace.horse_id
 }
 
 function getScenarioIcon(scenario) {
   const icons = {
-    'DOMINANT_FAVORITE': '👑',
-    'CLEAR_TOP_2': '🥇',
-    'STANDARD_TOP_3': '🏅',
-    'GROUPED_TOP_4': '⚖️',
-    'GROUPED_TOP_5': '🎲',
-    'OPEN_RACE': '🌟'
+    'clear-favorite': '⭐',
+    'clear-top-2': '🔥',
+    'standard-top-3': '🎯',
+    'grouped-top-4': '🤝',
+    'grouped-top-5': '🌊',
+    'open-race': '🎲'
   }
   return icons[scenario] || '📊'
 }
 
 function getScenarioClass(scenario) {
-  return scenario?.toLowerCase().replace(/_/g, '-') || 'default'
+  return scenario || 'standard-top-3'
 }
 
 function getProbabilityClass(probability) {
-  if (probability >= 30) return 'very-high'
-  if (probability >= 20) return 'high'
-  if (probability >= 10) return 'medium'
+  if (probability >= 40) return 'very-high'
+  if (probability >= 30) return 'high'
+  if (probability >= 20) return 'medium'
   return 'low'
 }
 
@@ -461,6 +512,47 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ... tous les styles existants ... */
+
+/* Combination Actions */
+.combination-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e5e5e5;
+}
+
+.combo-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.combo-btn.couple {
+  background: #3b82f6;
+  color: white;
+}
+
+.combo-btn.couple:hover {
+  background: #2563eb;
+}
+
+.combo-btn.trio {
+  background: #10b981;
+  color: white;
+}
+
+.combo-btn.trio:hover {
+  background: #059669;
+}
+
+/* Existing styles */
 .top-horses-page {
   padding: 20px;
   max-width: 1400px;
@@ -471,29 +563,39 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 30px;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+h1 {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 28px;
 }
 
 .controls {
   display: flex;
   gap: 10px;
+  align-items: center;
 }
 
 input[type="date"] {
   padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  border: 2px solid #d1d5db;
+  border-radius: 8px;
   font-size: 14px;
 }
 
 button {
+  padding: 10px 20px;
   background: #3498db;
   color: white;
   border: none;
-  padding: 10px 20px;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.3s;
 }
 
 button:hover:not(:disabled) {
@@ -501,97 +603,114 @@ button:hover:not(:disabled) {
 }
 
 button:disabled {
-  background: #95a5a6;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 20px;
-  margin-bottom: 20px;
+  margin-bottom: 30px;
 }
 
 .stat-card {
   background: white;
   padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   text-align: center;
+  transition: transform 0.2s;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 
 .stat-card.highlight {
-  background: #e8f5e9;
-  border: 2px solid #4caf50;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
 }
 
 .stat-card.scenario {
-  background: #e3f2fd;
-  border: 2px solid #2196f3;
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
 }
 
 .stat-value {
   font-size: 36px;
   font-weight: bold;
-  color: #2c3e50;
+  margin-bottom: 5px;
 }
 
 .stat-label {
   font-size: 14px;
   color: #7f8c8d;
-  margin-top: 5px;
+}
+
+.stat-card.highlight .stat-label,
+.stat-card.scenario .stat-label {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .tabs {
   display: flex;
   gap: 10px;
   margin-bottom: 20px;
+  border-bottom: 2px solid #ecf0f1;
+  flex-wrap: wrap;
 }
 
 .tabs button {
-  flex: 1;
-  background: white;
+  background: none;
+  color: #7f8c8d;
+  border: none;
+  border-bottom: 3px solid transparent;
+  padding: 10px 20px;
+  font-size: 15px;
+  transition: all 0.2s;
+}
+
+.tabs button:hover {
   color: #2c3e50;
-  border: 2px solid #ddd;
 }
 
 .tabs button.active {
-  background: #2196f3;
-  color: white;
-  border-color: #2196f3;
+  color: #3498db;
+  border-bottom-color: #3498db;
 }
 
 .loading {
   text-align: center;
-  padding: 40px;
+  padding: 50px;
   font-size: 18px;
   color: #7f8c8d;
 }
 
 .horses-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
   gap: 20px;
 }
 
 .horse-card {
   background: white;
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  overflow: hidden;
+  transition: all 0.3s;
   display: flex;
-  gap: 15px;
-  transition: transform 0.2s;
+  position: relative;
 }
 
 .horse-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+  transform: translateY(-5px);
+  box-shadow: 0 8px 16px rgba(0,0,0,0.15);
 }
 
 .horse-card.value-bet {
-  border: 2px solid #4caf50;
-  background: #f1f8e9;
+  border-left: 4px solid #4caf50;
 }
 
 .horse-card.top-group {
@@ -599,38 +718,37 @@ button:disabled {
 }
 
 .rank {
-  background: #3498db;
-  color: white;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  width: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-size: 24px;
   font-weight: bold;
-  font-size: 18px;
-  flex-shrink: 0;
 }
 
 .horse-main {
   flex: 1;
+  padding: 15px;
 }
 
 .scenario-badge {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 6px;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
   margin-bottom: 10px;
-  font-size: 13px;
-  font-weight: 600;
+  text-transform: uppercase;
 }
 
-.scenario-badge.dominant-favorite {
-  background: #fff3e0;
-  border: 2px solid #ff9800;
-  color: #e65100;
+.scenario-badge.clear-favorite {
+  background: #fff3cd;
+  border: 2px solid #ffc107;
+  color: #f57f17;
 }
 
 .scenario-badge.clear-top-2 {
@@ -779,7 +897,6 @@ code {
   font-family: monospace;
 }
 
-/* Store Bets Button */
 .store-btn {
   background: #10b981 !important;
 }
@@ -788,7 +905,6 @@ code {
   background: #059669 !important;
 }
 
-/* Store Result Messages */
 .store-result {
   margin-bottom: 20px;
   padding: 15px 20px;
@@ -850,7 +966,6 @@ code {
   }
 }
 
-/* Manual Bet Input */
 .manual-bet-input {
   display: flex;
   gap: 8px;
@@ -897,7 +1012,6 @@ code {
   cursor: not-allowed;
 }
 
-/* Manual Bets Section */
 .manual-bets-section {
   margin-top: 30px;
   padding: 20px;

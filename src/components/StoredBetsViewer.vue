@@ -111,13 +111,25 @@
             </div>
             <div class="stat">
               <span class="label">Course</span>
-              <span class="value">#{{ bet.race_id }}</span>
+              <!-- FIX: Afficher race_code (R1C3) au lieu de race_id -->
+              <span class="value">{{ getRaceCode(bet.race) }}</span>
             </div>
           </div>
           <div class="bet-meta" v-if="bet.metadata">
             <span v-if="bet.metadata.hippodrome">📍 {{ bet.metadata.hippodrome }}</span>
             <span v-if="bet.metadata.distance">📏 {{ bet.metadata.distance }}m</span>
           </div>
+
+          <!-- Actions pour créer combinés -->
+          <div class="bet-actions">
+            <button @click="startCombinaison(bet, 'COUPLE')" class="action-btn couple">
+              🔗 Couplé
+            </button>
+            <button @click="startCombinaison(bet, 'TRIO')" class="action-btn trio">
+              🔗🔗 Trio
+            </button>
+          </div>
+
           <div class="bet-footer">
             <span class="timestamp">{{ formatDate(bet.created_at) }}</span>
             <span class="status" :class="{ processed: bet.is_processed }">
@@ -151,9 +163,21 @@
               </div>
               <div class="metric">
                 <span class="label">Course</span>
-                <span class="value">#{{ bet.race_id }}</span>
+                <!-- FIX: Afficher race_code -->
+                <span class="value">{{ getRaceCode(bet.race) }}</span>
               </div>
             </div>
+
+            <!-- Actions pour créer combinés -->
+            <div class="bet-actions">
+              <button @click="startCombinaison(bet, 'COUPLE', true)" class="action-btn couple">
+                🔗 Couplé
+              </button>
+              <button @click="startCombinaison(bet, 'TRIO', true)" class="action-btn trio">
+                🔗🔗 Trio
+              </button>
+            </div>
+
             <div class="bet-footer">
               <span class="timestamp">{{ formatDate(bet.created_at) }}</span>
               <span class="status" :class="{ processed: bet.is_processed }">
@@ -172,8 +196,12 @@
             <span class="combo-id">#{{ combo.id }}</span>
           </div>
           <div class="horses-list">
-            <span v-for="(horse, index) in combo.horses" :key="index" class="horse-chip">
-              {{ horse.horse_name }}
+            <span
+              v-for="(horse, index) in parseHorses(combo.horses)"
+              :key="index"
+              class="horse-chip"
+            >
+              {{ horse.horse_name || horse }}
             </span>
           </div>
           <div class="combo-stats">
@@ -183,7 +211,8 @@
             </div>
             <div class="stat">
               <span class="label">Course</span>
-              <span class="value">#{{ combo.race_id }}</span>
+              <!-- FIX: Afficher race_code -->
+              <span class="value">{{ getRaceCode(combo.race) }}</span>
             </div>
           </div>
           <div class="combo-footer">
@@ -195,12 +224,24 @@
         </div>
       </div>
     </div>
+
+    <!-- Modal for adding combination -->
+    <CombinaisonModal
+      v-if="showCombinaisonModal"
+      :firstBet="selectedBet"
+      :type="combinationType"
+      :isValueBet="isValueBet"
+      :date="selectedDate"
+      @close="closeCombinaisonModal"
+      @success="onCombinaisonAdded"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { pmuApi } from '../services/pmuApi'
+import CombinaisonModal from './CombinaisonModal.vue'
 
 const selectedDate = ref(new Date().toISOString().split('T')[0])
 const loading = ref(false)
@@ -210,6 +251,12 @@ const activeTab = ref('daily')
 const dailyBets = ref([])
 const valueBets = ref([])
 const combinations = ref([])
+
+// Combinaison modal
+const showCombinaisonModal = ref(false)
+const selectedBet = ref(null)
+const combinationType = ref('COUPLE')
+const isValueBet = ref(false)
 
 const hasBets = computed(() =>
   dailyBets.value.length > 0 || valueBets.value.length > 0 || combinations.value.length > 0
@@ -223,11 +270,55 @@ const uniqueRaces = computed(() => {
   return races.size
 })
 
+/**
+ * Get race code (R1C3) from race object
+ */
+const getRaceCode = (race) => {
+  if (!race) return 'N/A'
+  return race.race_code || `#${race.id || 'N/A'}`
+}
+
+/**
+ * Parse horses - handles both array and JSON string
+ */
+const parseHorses = (horses) => {
+  if (!horses) return []
+  if (Array.isArray(horses)) return horses
+  if (typeof horses === 'string') {
+    try {
+      return JSON.parse(horses)
+    } catch (e) {
+      console.error('Failed to parse horses:', e)
+      return []
+    }
+  }
+  return []
+}
+
+/**
+ * Start creating a combination from a bet
+ */
+const startCombinaison = (bet, type, isValue = false) => {
+  selectedBet.value = bet
+  combinationType.value = type
+  isValueBet.value = isValue
+  showCombinaisonModal.value = true
+}
+
+const closeCombinaisonModal = () => {
+  showCombinaisonModal.value = false
+  selectedBet.value = null
+}
+
+const onCombinaisonAdded = () => {
+  closeCombinaisonModal()
+  // Optionally reload or show success message
+}
+
 const loadStoredBets = async () => {
   loading.value = true
 
   try {
-    // Load all three types
     const [dailyResponse, valueResponse, comboResponse] = await Promise.all([
       pmuApi.getDailyBets(selectedDate.value),
       pmuApi.getValueBets(selectedDate.value),
@@ -252,7 +343,6 @@ const clearBets = async () => {
   clearing.value = true
 
   try {
-    // Note: You'll need to add a DELETE endpoint in the backend
     await fetch(`/api/pmu/betting/clear?date=${selectedDate.value}`, {
       method: 'DELETE'
     })
@@ -283,6 +373,47 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ... styles existants ... */
+
+/* Nouvelle section pour les actions */
+.bet-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e5e5;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-btn.couple {
+  background: #3b82f6;
+  color: white;
+}
+
+.action-btn.couple:hover {
+  background: #2563eb;
+}
+
+.action-btn.trio {
+  background: #10b981;
+  color: white;
+}
+
+.action-btn.trio:hover {
+  background: #059669;
+}
+
+/* Existing styles... */
 .stored-bets-page {
   padding: 2rem;
   max-width: 1400px;
