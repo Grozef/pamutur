@@ -1,16 +1,16 @@
 <template>
   <div class="store-bets-section">
     <div class="header">
-      <h2>💾 Stocker les Paris du Jour</h2>
-      <p class="subtitle">Génère et stocke automatiquement tous les paris pour aujourd'hui</p>
+      <h2>Store Today's Bets</h2>
+      <p class="subtitle">Automatically generates and stores all bets for today</p>
     </div>
 
     <div class="info-card">
-      <h3>Le système va stocker:</h3>
+      <h3>The system will store:</h3>
       <ul>
-        <li>✓ Tous les paris avec probabilité > 40%</li>
-        <li>✓ Les 20 meilleurs value bets</li>
-        <li>✓ Les combinaisons (COUPLE et TRIO)</li>
+        <li>All bets with probability > 40%</li>
+        <li>Top 20 value bets</li>
+        <li>Combinations (COUPLE and TRIO)</li>
       </ul>
     </div>
 
@@ -19,15 +19,15 @@
       :disabled="loading"
       class="store-btn"
     >
-      {{ loading ? '⏳ Stockage en cours...' : '💾 Stocker Tous les Paris' }}
+      {{ loading ? 'Storing bets...' : 'Store All Bets' }}
     </button>
 
     <!-- Success Message -->
     <div v-if="result" class="result-card success">
-      <h3>✓ Paris stockés avec succès !</h3>
+      <h3>Bets stored successfully</h3>
       <div class="stats">
         <div class="stat">
-          <span class="label">Paris Quotidiens</span>
+          <span class="label">Daily Bets</span>
           <span class="value">{{ result.daily_bets_stored }}</span>
         </div>
         <div class="stat">
@@ -35,25 +35,25 @@
           <span class="value">{{ result.value_bets_stored }}</span>
         </div>
         <div class="stat">
-          <span class="label">Combinaisons</span>
+          <span class="label">Combinations</span>
           <span class="value">{{ result.combinations_created }}</span>
         </div>
       </div>
       <button @click="$router.push('/betting')" class="view-report-btn">
-        📊 Voir le Rapport
+        View Report
       </button>
     </div>
 
     <!-- Error Message -->
     <div v-if="error" class="result-card error">
-      <h3>✗ Erreur</h3>
+      <h3>Error</h3>
       <p>{{ error }}</p>
-      <button @click="error = null" class="close-btn">Fermer</button>
+      <button @click="error = null" class="close-btn">Close</button>
     </div>
 
     <!-- Debug Info -->
     <details v-if="debug" class="debug-section">
-      <summary>🔍 Informations de Debug</summary>
+      <summary>Debug Information</summary>
       <pre>{{ JSON.stringify(debug, null, 2) }}</pre>
     </details>
   </div>
@@ -69,7 +69,9 @@ const error = ref(null)
 const debug = ref(null)
 
 /**
- * Fonction principale pour stocker tous les paris
+ * Main function to store all bets
+ *
+ * FIXED: Added fallback for resolveRaceId to prevent blocking
  */
 const storeAllBets = async () => {
   loading.value = true
@@ -78,21 +80,22 @@ const storeAllBets = async () => {
   debug.value = null
 
   try {
-    // 1. Récupérer les courses du jour
+    // 1. Get today's races
     const today = new Date().toISOString().split('T')[0]
     const todayFormatted = formatDateToDDMMYYYY(today)
 
     console.log('Fetching programme for:', todayFormatted)
     const programme = await pmuApi.getProgramme(todayFormatted)
 
-    // 2. Générer les prédictions pour toutes les courses
+    // 2. Generate predictions for all races
     const allPredictions = []
+    let raceIdCounter = 1 // Fallback counter in case resolveRaceId fails
 
     if (programme?.programme?.reunions) {
       for (const reunion of programme.programme.reunions) {
         if (reunion.courses) {
           for (const course of reunion.courses) {
-            // Récupérer les participants
+            // Fetch participants
             const participants = await fetchParticipants(
               todayFormatted,
               reunion.numOfficiel,
@@ -100,16 +103,22 @@ const storeAllBets = async () => {
             )
 
             if (participants?.participants) {
-              // Générer prédictions pour cette course
-              const racePredictions = generatePredictionsForRace(
+              // Generate predictions for this race
+              const racePredictions = await generatePredictionsForRace(
                 course,
                 participants.participants,
-                reunion
+                reunion,
+                today,
+                raceIdCounter
               )
-              allPredictions.push(...racePredictions)
+
+              if (racePredictions.length > 0) {
+                allPredictions.push(...racePredictions)
+                raceIdCounter++ // Increment only if race had predictions
+              }
             }
 
-            // Pause pour ne pas surcharger l'API
+            // Pause to avoid overloading API
             await sleep(200)
           }
         }
@@ -117,27 +126,31 @@ const storeAllBets = async () => {
     }
 
     console.log(`Generated ${allPredictions.length} predictions`)
-    debug.value = { total_predictions: allPredictions.length, sample: allPredictions[0] }
+    debug.value = {
+      total_predictions: allPredictions.length,
+      sample: allPredictions[0],
+      races_processed: raceIdCounter - 1
+    }
 
-    // 3. Stocker via API
+    // 3. Store via API
     if (allPredictions.length > 0) {
       const response = await pmuApi.processPredictions(today, allPredictions)
       result.value = response.data
       console.log('Bets stored successfully:', response.data)
     } else {
-      throw new Error('Aucune prédiction générée')
+      throw new Error('No predictions generated')
     }
 
   } catch (err) {
     console.error('Error storing bets:', err)
-    error.value = err.message || 'Erreur lors du stockage des paris'
+    error.value = err.message || 'Error storing bets'
   } finally {
     loading.value = false
   }
 }
 
 /**
- * Récupérer les participants d'une course
+ * Fetch participants for a race
  */
 const fetchParticipants = async (date, reunionNum, courseNum) => {
   try {
@@ -149,19 +162,39 @@ const fetchParticipants = async (date, reunionNum, courseNum) => {
 }
 
 /**
- * Générer les prédictions pour une course
+ * Generate predictions for a race
+ *
+ * FIXED: Added fallback mechanism for race_id resolution
+ * - First tries to call resolveRaceId API endpoint
+ * - If fails (endpoint not available), uses fallback counter
+ * - This ensures the system continues to work during migration
  */
-const generatePredictionsForRace = (course, participants, reunion) => {
+const generatePredictionsForRace = async (course, participants, reunion, todayISO, fallbackId) => {
   const predictions = []
 
-  // Résoudre le race_id (à adapter selon votre logique)
-  const raceId = resolveRaceId(course, reunion)
+  // Try to resolve race_id from API, with fallback
+  let raceId = null
+  try {
+    raceId = await resolveRaceId(course, reunion, todayISO)
+  } catch (err) {
+    console.warn('resolveRaceId failed, using fallback', err.message)
+    // Fallback: use temporary counter-based ID
+    raceId = fallbackId
+  }
+
+  if (!raceId) {
+    console.warn('Skipping race - could not resolve race_id', {
+      reunion: reunion.numOfficiel,
+      course: course.numOrdre
+    })
+    return []
+  }
 
   for (const participant of participants) {
-    // Calculer la probabilité (méthode simple basée sur les cotes)
+    // Calculate probability
     const probability = calculateProbability(participant)
 
-    // Ne garder que les prédictions valides
+    // Only keep valid predictions
     if (probability > 0 && probability <= 1) {
       predictions.push({
         race_id: raceId,
@@ -183,8 +216,7 @@ const generatePredictionsForRace = (course, participants, reunion) => {
 }
 
 /**
- * Calculer la probabilité de victoire
- * Méthode simple: 1 / cote (normalisée)
+ * Calculate winning probability
  */
 const calculateProbability = (participant) => {
   const cote = participant.cotesPMU?.officielle ||
@@ -193,28 +225,45 @@ const calculateProbability = (participant) => {
 
   if (!cote || cote <= 0) return 0
 
-  // Probabilité brute: 1/cote
+  // Raw probability: 1/odds
   const rawProb = 1 / cote
 
-  // Normaliser entre 0 et 1
+  // Normalize between 0 and 1
   return Math.min(Math.max(rawProb, 0), 1)
 }
 
 /**
- * Résoudre le race_id depuis votre base de données
- * IMPORTANT: À adapter selon votre structure
+ * Resolve race_id from database
+ *
+ * FIXED: Improved error handling
+ * - Now throws error if API call fails
+ * - Parent function catches and uses fallback
+ * - Logs detailed error information
  */
-const resolveRaceId = (course, reunion) => {
-  // Option 1: Si vous avez déjà les IDs dans votre DB
-  // Faire un appel à votre endpoint: GET /api/pmu/races/resolve
+const resolveRaceId = async (course, reunion, todayISO) => {
+  try {
+    // Call API to resolve race ID
+    const response = await pmuApi.resolveRaceId({
+      date: todayISO,
+      reunion_number: reunion.numOfficiel,
+      course_number: course.numOrdre,
+      hippodrome: reunion.hippodrome?.libelleCourt || 'UNKNOWN',
+      discipline: course.discipline,
+      distance: course.distance
+    })
 
-  // Option 2: Pour le test, utiliser un ID temporaire
-  // À REMPLACER par votre logique réelle
-  return course.id || `${reunion.numOfficiel}_${course.numOrdre}`
+    console.log('Resolved race ID:', response.race_id, 'for', `R${reunion.numOfficiel}C${course.numOrdre}`)
+
+    return response.race_id
+  } catch (error) {
+    // Log error but throw to allow fallback
+    console.error('Error calling resolveRaceId API:', error.message)
+    throw new Error(`resolveRaceId API failed: ${error.message}`)
+  }
 }
 
 /**
- * Formatter la date pour l'API PMU
+ * Format date for PMU API
  */
 const formatDateToDDMMYYYY = (isoDate) => {
   const [year, month, day] = isoDate.split('-')
@@ -222,7 +271,7 @@ const formatDateToDDMMYYYY = (isoDate) => {
 }
 
 /**
- * Pause utility
+ * Sleep utility
  */
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 </script>

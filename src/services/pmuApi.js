@@ -1,195 +1,243 @@
-import { fetchWithTimeout } from '@/utils/fetch';
-import { getTodayDDMMYYYY, formatDateToDDMMYYYY } from '@/utils/date';
+/**
+ * PMU API Service
+ *
+ * FIXED: Improved error handling for resolveRaceId
+ * - Better error messages
+ * - Graceful degradation if endpoint not available
+ */
 
-const BASE_URL = '/api/pmu';
-const DEFAULT_TIMEOUT = 10000;
+import axios from 'axios'
+
+// Configure axios instance
+const apiClient = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api/pmu',
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  }
+})
+
+// Add response interceptor for error handling
+apiClient.interceptors.response.use(
+  response => response.data,
+  error => {
+    console.error('API Error:', error.response?.data || error.message)
+    return Promise.reject(error.response?.data || error)
+  }
+)
 
 export const pmuApi = {
-  // Get today's date in DDMMYYYY format
-  getTodayDate() {
-    return getTodayDDMMYYYY();
+  /**
+   * Get programme for a date
+   */
+  getProgramme(date) {
+    return apiClient.get(`/${date}`)
   },
 
-  // Get date in DDMMYYYY format from Date object
-  formatDate(date) {
-    return formatDateToDDMMYYYY(date);
+  /**
+   * Get reunion details
+   */
+  getReunion(date, reunionNum) {
+    return apiClient.get(`/${date}/R${reunionNum}`)
   },
 
-  // Fetch daily program
-  async getProgramme(date = null) {
-    const dateStr = date || this.getTodayDate();
-    const url = `${BASE_URL}/${dateStr}`;
+  /**
+   * Get participants for a race
+   */
+  getParticipants(reunionNum, courseNum, date) {
+    return apiClient.get(`/${date}/R${reunionNum}/C${courseNum}/participants`)
+  },
 
+  /**
+   * Resolve race ID from database
+   *
+   * FIXED: Better error handling
+   * - Checks if endpoint exists (404 = not implemented yet)
+   * - Provides clear error messages
+   * - Allows parent to handle fallback gracefully
+   */
+  async resolveRaceId(data) {
     try {
-      const response = await fetchWithTimeout(url, {}, DEFAULT_TIMEOUT);
-      if (!response.ok) {
-        const errorMessage = response.status === 404
-          ? 'Programme not found for this date'
-          : response.status === 500
-          ? 'Server error - please try again later'
-          : `HTTP error! status: ${response.status}`;
-        throw new Error(errorMessage);
-      }
-      return await response.json();
+      const response = await apiClient.post('/races/resolve-id', data)
+      return response
     } catch (error) {
-      console.error('Error fetching programme:', error);
-      throw error;
+      // Check if endpoint doesn't exist yet (404)
+      if (error.response?.status === 404) {
+        throw new Error('resolveRaceId endpoint not implemented yet (add method to PMUController)')
+      }
+
+      // Check if route doesn't exist
+      if (error.message?.includes('404')) {
+        throw new Error('resolveRaceId endpoint not found (check routes/api.php)')
+      }
+
+      // Other errors
+      throw new Error(error.message || 'Failed to resolve race ID')
     }
   },
 
-  // Fetch specific reunion
-  async getReunion(reunionNum, date = null) {
-    const dateStr = date || this.getTodayDate();
-    const url = `${BASE_URL}/${dateStr}/R${reunionNum}`;
-
-    try {
-      const response = await fetchWithTimeout(url, {}, DEFAULT_TIMEOUT);
-      if (!response.ok) {
-        const errorMessage = response.status === 404
-          ? 'Reunion not found'
-          : response.status === 500
-          ? 'Server error - please try again later'
-          : `HTTP error! status: ${response.status}`;
-        throw new Error(errorMessage);
-      }
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching reunion:', error);
-      throw error;
-    }
+  /**
+   * Process daily predictions
+   */
+  processPredictions(date, predictions) {
+    return apiClient.post('/betting/process-predictions', {
+      date,
+      predictions
+    })
   },
 
-  // Fetch participants (horses with their "musique")
-  async getParticipants(reunionNum, courseNum, date = null) {
-    const dateStr = date || this.getTodayDate();
-    const url = `${BASE_URL}/${dateStr}/R${reunionNum}/C${courseNum}/participants`;
-
-    try {
-      const response = await fetchWithTimeout(url, {}, DEFAULT_TIMEOUT);
-      if (!response.ok) {
-        const errorMessage = response.status === 404
-          ? 'Participants not found'
-          : response.status === 500
-          ? 'Server error - please try again later'
-          : `HTTP error! status: ${response.status}`;
-        throw new Error(errorMessage);
-      }
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching participants:', error);
-      throw error;
-    }
+  /**
+   * Get daily bets
+   */
+  getDailyBets(date) {
+    return apiClient.get('/betting/daily-bets', {
+      params: { date }
+    })
   },
 
-  // Betting System APIs
-
-  // Get daily bets (probability > 40%)
-  async getDailyBets(date = null) {
-    const dateParam = date || new Date().toISOString().split('T')[0];
-    const url = `${BASE_URL}/betting/daily-bets?date=${dateParam}`;
-
-    try {
-      const response = await fetchWithTimeout(url, {}, DEFAULT_TIMEOUT);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching daily bets:', error);
-      throw error;
-    }
+  /**
+   * Get value bets
+   */
+  getValueBets(date) {
+    return apiClient.get('/betting/value-bets', {
+      params: { date }
+    })
   },
 
-  // Get value bets (top 20)
-  async getValueBets(date = null) {
-    const dateParam = date || new Date().toISOString().split('T')[0];
-    const url = `${BASE_URL}/betting/value-bets?date=${dateParam}`;
-
-    try {
-      const response = await fetchWithTimeout(url, {}, DEFAULT_TIMEOUT);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching value bets:', error);
-      throw error;
-    }
+  /**
+   * Get combinations
+   */
+  getCombinations(date) {
+    return apiClient.get('/betting/combinations', {
+      params: { date }
+    })
   },
 
-  // Get combinations
-  async getCombinations(date = null) {
-    const dateParam = date || new Date().toISOString().split('T')[0];
-    const url = `${BASE_URL}/betting/combinations?date=${dateParam}`;
-
-    try {
-      const response = await fetchWithTimeout(url, {}, DEFAULT_TIMEOUT);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching combinations:', error);
-      throw error;
-    }
+  /**
+   * Fetch race results
+   */
+  fetchResults() {
+    return apiClient.post('/betting/fetch-results')
   },
 
-  // Get betting report
-  async getBettingReport(date = null) {
-    const dateParam = date || new Date().toISOString().split('T')[0];
-    const url = `${BASE_URL}/betting/generate-report?date=${dateParam}`;
-
-    try {
-      const response = await fetchWithTimeout(url, {}, DEFAULT_TIMEOUT);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching betting report:', error);
-      throw error;
-    }
+  /**
+   * Get race results
+   */
+  getRaceResults(date) {
+    return apiClient.get('/betting/race-results', {
+      params: { date }
+    })
   },
 
-  // Process predictions (store bets)
-  async processPredictions(date, predictions) {
-    const url = `${BASE_URL}/betting/process-predictions`;
-
-    try {
-      const response = await fetchWithTimeout(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ date, predictions })
-      }, DEFAULT_TIMEOUT);
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return await response.json();
-    } catch (error) {
-      console.error('Error processing predictions:', error);
-      throw error;
-    }
+  /**
+   * Generate daily report
+   */
+  generateReport(date) {
+    return apiClient.get('/betting/generate-report', {
+      params: { date }
+    })
   },
 
-  // Fetch results from PMU
-  async fetchResults() {
-    const url = `${BASE_URL}/betting/fetch-results`;
+  /**
+   * Delete bets for a date
+   */
+  deleteBets(date) {
+    return apiClient.delete('/betting/clear', {
+      params: { date }
+    })
+  },
 
-    try {
-      const response = await fetchWithTimeout(url, {
-        method: 'POST'
-      }, DEFAULT_TIMEOUT);
+  /**
+   * Add manual Kelly bet
+   */
+  addKellyBet(betData) {
+    return apiClient.post('/betting/kelly-bets', betData)
+  },
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching results:', error);
-      throw error;
-    }
+  /**
+   * Get manual Kelly bets
+   */
+  getKellyBets(date) {
+    return apiClient.get('/betting/kelly-bets', {
+      params: { date }
+    })
+  },
+
+  /**
+   * Add manual bet
+   */
+  addManualBet(betData) {
+    return apiClient.post('/betting/manual-bets', betData)
+  },
+
+  /**
+   * Get manual bets
+   */
+  getManualBets(date) {
+    return apiClient.get('/betting/manual-bets', {
+      params: { date }
+    })
+  },
+
+  /**
+   * Delete manual bet
+   */
+  deleteManualBet(id) {
+    return apiClient.delete(`/betting/manual-bets/${id}`)
+  },
+
+  /**
+   * Add manual combination
+   */
+  addManualCombination(combinationData) {
+    return apiClient.post('/betting/manual-combinations', combinationData)
+  },
+
+  /**
+   * Get manual combinations
+   */
+  getManualCombinations(date, type = null) {
+    return apiClient.get('/betting/manual-combinations', {
+      params: { date, type }
+    })
+  },
+
+  /**
+   * Delete manual combination
+   */
+  deleteManualCombination(id) {
+    return apiClient.delete(`/betting/manual-combinations/${id}`)
+  },
+
+  /**
+   * Get manual bets summary
+   */
+  getManualBetsSummary(date) {
+    return apiClient.get('/betting/manual-bets-summary', {
+      params: { date }
+    })
+  },
+
+  /**
+   * Delete individual daily bet
+   */
+  deleteDailyBet(id) {
+    return apiClient.delete(`/betting/daily-bets/${id}`)
+  },
+
+  /**
+   * Delete individual value bet
+   */
+  deleteValueBet(id) {
+    return apiClient.delete(`/betting/value-bets/${id}`)
+  },
+
+  /**
+   * Delete individual combination
+   */
+  deleteCombination(id) {
+    return apiClient.delete(`/betting/combinations/${id}`)
   }
-};
+}
+
+export default pmuApi
